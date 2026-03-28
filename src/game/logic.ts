@@ -98,28 +98,32 @@ export function createDeck(): Card[] {
 // ---- Validation ----
 
 export function canPlayCard(card: Card, topCard: Card, currentColor: CardColor, drawStack: number, houseRules: HouseRules): boolean {
-  // Wild cards always playable (unless draw stacking is active)
-  if (card.value === 'wild' || card.value === 'wild4') {
-    if (houseRules.noMercyWild4) return true;
-    if (drawStack > 0 && houseRules.stackDrawCards) {
-      // Can only play if it's also a draw card to stack
-      return card.value === 'wild4' || (card.value === 'draw2' && topCard.value === 'draw2');
+  // 1. Handling Draw Stack (if rule enabled)
+  if (drawStack > 0 && houseRules.stackDrawCards) {
+    if (topCard.value === 'draw2') {
+      return card.value === 'draw2' || card.value === 'wild4';
     }
+    if (topCard.value === 'wild4') {
+      return card.value === 'wild4';
+    }
+    // If there's a stack but the top card isn't a draw card? (Shouldn't happen)
+    return false;
+  }
+
+  // 2. Wilds are always playable normally
+  if (card.value === 'wild' || card.value === 'wild4') {
     return true;
   }
 
-  // If a draw stack is active and not stacking, must draw
-  if (drawStack > 0 && houseRules.stackDrawCards) {
-    // Only a matching draw card can be stacked
-    if (topCard.value === 'draw2') return card.value === 'draw2';
-    if (topCard.value === 'wild4') return card.value === 'wild4';
+  // 3. Match by Color
+  if (card.color === currentColor) {
+    return true;
   }
 
-  // Match color
-  if (card.color === currentColor) return true;
-
-  // Match value/type (e.g., skip on skip regardless of color)
-  if (card.value === topCard.value) return true;
+  // 4. Match by Value
+  if (card.value === topCard.value) {
+    return true;
+  }
 
   return false;
 }
@@ -450,27 +454,6 @@ export function playCard(
     }
   }
 
-  // Handle accumulated draw stack — if current player has no draw card to stack, they draw
-  if (
-    s.drawStack > 0
-    && !requiresColorPick
-    && s.houseRules.stackDrawCards
-    && card.value !== 'draw2'
-    && card.value !== 'wild4'
-  ) {
-    const target = s.currentPlayerIndex;
-    const { drawn, newDeck, newDiscard: nd } = drawCards(s.deck, s.discardPile, s.drawStack);
-    const targetPlayer = s.players[target];
-    s.players = s.players.map((p, i) =>
-      i === target ? { ...p, hand: [...p.hand, ...drawn] } : p
-    );
-    s.deck = newDeck;
-    s.discardPile = nd;
-    s.drawStack = 0;
-    s.currentPlayerIndex = getNextPlayerIndex(s);
-    action.type = card.value === 'draw2' ? 'draw2' : 'wild4';
-    action.targetPlayerId = targetPlayer.id;
-  }
 
   // Update current color from played card
   if (!requiresColorPick && card.color !== 'wild') {

@@ -44,7 +44,7 @@ export default {
       },
       boxShadow: {
         'gold-glow': '0 0 20px rgba(212, 175, 55, 0.5), 0 0 40px rgba(212, 175, 55, 0.2)',
-        'player-glow': '0 0 15px var(--player-color), 0 0 30px var(--player-color-dim)',
+        'player-glow': '0 0 15px rgba(212, 175, 55, 0.5), 0 0 30px rgba(212, 175, 55, 0.2)',
         'card-hover': '0 8px 32px rgba(0,0,0,0.8), 0 0 16px rgba(212,175,55,0.3)',
         'uno-button': '0 0 20px rgba(229, 62, 62, 0.7), 0 0 40px rgba(229, 62, 62, 0.3)',
       },

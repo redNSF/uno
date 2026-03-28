@@ -1,0 +1,13 @@
+﻿src/game/logic.ts(106,41): error TS2367: This comparison appears to be unintentional because the types '"wild"' and '"draw2"' have no overlap.
+src/game/logic.ts(115,43): error TS2367: This comparison appears to be unintentional because the types '"0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "skip" | "reverse" | "draw2"' and '"wild4"' have no overlap.
+src/game/logic.ts(471,19): error TS2367: This comparison appears to be unintentional because the types '"0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "skip" | "reverse" | "wild"' and '"draw2"' have no overlap.
+src/party/client.ts(10,35): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/textures/CardTextureGenerator.ts(225,7): error TS2367: This comparison appears to be unintentional because the types '"0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "skip" | "reverse" | "draw2" | "wild" | "wild4"' and '"back"' have no overlap.
+src/three/PostFX.tsx(42,7): error TS2322: Type 'false | Element' is not assignable to type 'Element'.
+  Type 'boolean' is not assignable to type 'ReactElement<any, any>'.
+src/three/PostFX.tsx(49,7): error TS2322: Type 'false | Element' is not assignable to type 'Element'.
+  Type 'boolean' is not assignable to type 'ReactElement<any, any>'.
+src/three/Scene.tsx(15,10): error TS2305: Module '"../utils/seatLayout"' has no exported member 'computeSeatPositions'.
+src/three/Table.tsx(8,22): error TS2307: Cannot find module '../shaders/felt.vert.glsl' or its corresponding type declarations.
+src/three/Table.tsx(9,22): error TS2307: Cannot find module '../shaders/felt.frag.glsl' or its corresponding type declarations.
+src/ui/PartyLobby.tsx(113,20): error TS7006: Parameter 'r' implicitly has an 'any' type.

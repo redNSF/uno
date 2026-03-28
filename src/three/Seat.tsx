@@ -11,8 +11,8 @@ import { Player } from '../game/logic';
 interface SeatProps {
   player: Player;
   isActive: boolean;
-  position: [number, number, number];
-  rotation: number; // Y-axis rotation in radians
+  position: THREE.Vector3;
+  rotation: [number, number, number];
 }
 
 export function Seat({ player, isActive, position, rotation }: SeatProps) {
@@ -32,7 +32,7 @@ export function Seat({ player, isActive, position, rotation }: SeatProps) {
   const color = player.signatureColor ?? '#D4AF37';
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={rotation}>
       {/* Glow ring on floor */}
       <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]}>
         <ringGeometry args={[0.8, 1.0, 32]} />

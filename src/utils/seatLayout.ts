@@ -12,7 +12,7 @@ export interface SeatLayout {
   /** Angle in radians — 0 = bottom (human seat, toward camera) */
   angle: number;
   /** Euler Y rotation for the seat nameplate/chair to face table center */
-  rotationY: number;
+  rotation: [number, number, number];
   /** Hand fan direction — angle pointing inward toward table center */
   handAngle: number;
   /** For camera: how far to pull back */
@@ -42,10 +42,9 @@ const CAMERA_PRESETS: Record<number, { distance: number; height: number }> = {
 };
 
 /**
- * Compute seat positions and orientations for N players around an oval table.
  * Index 0 is always the human player at the bottom.
  */
-export function computeSeatLayouts(playerCount: number): SeatLayout[] {
+export function computeSeatPositions(playerCount: number): SeatLayout[] {
   const count = Math.max(2, Math.min(MAX_PLAYERS, playerCount));
   const angles = SEAT_ANGLE_MAPS[count] ?? SEAT_ANGLE_MAPS[7];
   const camera = CAMERA_PRESETS[count] ?? CAMERA_PRESETS[7];
@@ -74,7 +73,7 @@ export function computeSeatLayouts(playerCount: number): SeatLayout[] {
     return {
       position,
       angle,
-      rotationY,
+      rotation: [0, rotationY, 0],
       handAngle,
       cameraDistance: camera.distance,
       cameraHeight: camera.height,

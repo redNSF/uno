@@ -222,7 +222,7 @@ export function generateCardTexture(card: Card): THREE.CanvasTexture {
   ctx.fillStyle = '#FFFFFF';
   ctx.fill();
 
-  if (card.value === 'back') {
+  if ((card.value as string) === 'back') {
     drawCardBack(ctx);
   } else if (card.color === 'wild') {
     drawWildCard(ctx, card);

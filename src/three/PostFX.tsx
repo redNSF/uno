@@ -39,16 +39,16 @@ export function PostFX() {
         radialModulation={false}
         modulationOffset={0}
       />
-      {isColorPick && (
+      {isColorPick ? (
         <DepthOfField
           focusDistance={0.02}
           focalLength={0.5}
           bokehScale={4}
         />
-      )}
-      {isGameEnd && (
+      ) : <></>}
+      {isGameEnd ? (
         <Noise opacity={0.04} />
-      )}
+      ) : <></>}
     </EffectComposer>
   );
 }

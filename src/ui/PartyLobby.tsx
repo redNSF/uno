@@ -110,7 +110,7 @@ export function PartyLobby() {
       onStartGame={handleStartGame}
       onBack={() => setMode('landing')}
       chatRef={chatRef}
-      onReaction={(r) => sendChatMessage(r)}
+      onReaction={(r: string) => sendChatMessage(r)}
       onCopy={handleCopy}
       copied={copied}
     />;
