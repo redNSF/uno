@@ -1,58 +1,51 @@
-/**
- * UnoButton.tsx — Pulsing UNO call button
- */
-
-import React from 'react';
-import { useUnoStore } from '../game/store';
+import { useEffect, useRef } from 'react'
+import { useStore } from '../game/store'
 
 export function UnoButton() {
-  const handleCallUno = useUnoStore((s) => s.handleCallUno);
-  const game = useUnoStore((s) => s.game);
-  const myPlayerId = useUnoStore((s) => s.myPlayerId);
+  const ui = useStore(s => s.ui)
+  const callUno = useStore(s => s.callUno)
+  const localPlayerId = useStore(s => s.party.localPlayerId)
+  const countdownRef = useRef<HTMLCanvasElement>(null!)
 
-  // Countdown ring shows 2s window
-  const isWindow = game?.unoCallWindow;
+  const visible = ui.unoButtonVisible && ui.unoButtonPlayerId === localPlayerId
+
+  useEffect(() => {
+    if (!visible || !countdownRef.current) return
+    const start = Date.now()
+    const duration = 2000
+    let raf: number
+
+    const draw = () => {
+      const canvas = countdownRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')!
+      const W = canvas.width
+      const progress = Math.max(0, 1 - (Date.now() - start) / duration)
+      ctx.clearRect(0, 0, W, W)
+
+      ctx.beginPath()
+      ctx.arc(W / 2, W / 2, W / 2 - 2, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2)
+      ctx.strokeStyle = '#f5c817'
+      ctx.lineWidth = 3
+      ctx.lineCap = 'round'
+      ctx.stroke()
+
+      if (progress > 0) raf = requestAnimationFrame(draw)
+    }
+    raf = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(raf)
+  }, [visible])
+
+  if (!visible) return null
 
   return (
-    <div className="relative flex items-center justify-center">
-      {/* Countdown ring */}
-      {isWindow && (
-        <svg
-          className="absolute"
-          width="96"
-          height="96"
-          style={{ transform: 'rotate(-90deg)' }}
-        >
-          <circle
-            cx="48" cy="48" r="44"
-            fill="none"
-            stroke="rgba(229,62,62,0.3)"
-            strokeWidth="4"
-          />
-          <circle
-            className="turn-timer-arc"
-            cx="48" cy="48" r="44"
-            fill="none"
-            stroke="#FC8181"
-            strokeWidth="4"
-            strokeDasharray="276"
-            strokeDashoffset="0"
-            style={{
-              animation: 'countdown-ring 2s linear forwards',
-              strokeLinecap: 'round',
-            }}
-          />
-        </svg>
-      )}
-
-      <button
-        id="btn-uno"
-        className="uno-button"
-        onClick={handleCallUno}
-        aria-label="Call UNO"
-      >
-        UNO
-      </button>
-    </div>
-  );
+    <button
+      id="uno-button"
+      className="uno-button"
+      onClick={() => callUno(localPlayerId)}
+    >
+      <span className="uno-button-text">UNO!</span>
+      <canvas ref={countdownRef} width={72} height={72} className="uno-countdown" />
+    </button>
+  )
 }

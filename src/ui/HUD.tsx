@@ -1,157 +1,135 @@
-/**
- * HUD.tsx — In-game overlay: badges, color orb, timers
- */
-
-import React, { useEffect, useRef } from 'react';
-import { useUnoStore } from '../game/store';
-import { UnoButton } from './UnoButton';
-import { ColorPicker } from './ColorPicker';
-import { Toast } from './Toast';
-import { TurnTimer } from './TurnTimer';
-import { WinScreen } from './WinScreen';
-import { getPlayableCards } from '../game/logic';
-
-const CARD_COLORS = ['red', 'blue', 'green', 'yellow'] as const;
+import { useEffect, useRef } from 'react'
+import { useStore } from '../game/store'
+import { TIMING, SEAT_COLORS } from '../utils/constants'
 
 const COLOR_HEX: Record<string, string> = {
-  red: '#E53E3E',
-  blue: '#3182CE',
-  green: '#38A169',
-  yellow: '#ECC94B',
-};
+  red: '#e02020', yellow: '#f5c817', green: '#1fb851', blue: '#1a6fff', wild: '#c084fc',
+}
 
 export function HUD() {
-  const game = useUnoStore((s) => s.game);
-  const myPlayerId = useUnoStore((s) => s.myPlayerId);
-  const pendingWildColor = useUnoStore((s) => s.pendingWildColor);
-  const toasts = useUnoStore((s) => s.toasts);
-  const handleDrawCard = useUnoStore((s) => s.handleDrawCard);
-  const handlePass = useUnoStore((s) => s.handlePass);
-  const setScreen = useUnoStore((s) => s.setScreen);
+  const gameState = useStore(s => s.gameState)
+  const ui = useStore(s => s.ui)
+  const anim = useStore(s => s.anim)
+  const drawCardAction = useStore(s => s.drawCardAction)
 
-  if (!game) return null;
+  if (!gameState || gameState.phase === 'idle' || gameState.phase === 'dealing') return null
 
-  const currentPlayer = game.players[game.currentPlayerIndex];
-  const isMyTurn = currentPlayer?.id === myPlayerId;
-  const myPlayer = game.players.find((p) => p.id === myPlayerId);
-  const topCard = game.discardPile[game.discardPile.length - 1];
-  const currentColor = game.currentColor;
-
-  // UNO button visible when I have exactly 1 card and window is open
-  const showUnoButton =
-    game.unoCallWindow &&
-    (game.unoCallWindowPlayer === myPlayerId || (myPlayer && myPlayer.hand.length === 1));
-
-  // Playable cards
-  const playableCards = myPlayer
-    ? getPlayableCards(game, myPlayerId!)
-    : [];
-  const hasPlayableCard = playableCards.length > 0;
-  const canDraw = isMyTurn && game.phase === 'playing';
-
-  if (game.phase === 'game-end') {
-    return (
-      <>
-        <WinScreen winnerId={game.winner} />
-        <ToastList toasts={toasts} />
-      </>
-    );
-  }
+  const { players, currentPlayerIndex, activeColor, drawStack, direction } = gameState
+  const currentPlayer = players[currentPlayerIndex]
+  const isHumanTurn = currentPlayer?.isHuman
 
   return (
-    <div className="absolute inset-0 pointer-events-none z-10">
-      {/* Current color orb — center bottom */}
-      <div className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none">
-        <div
-          className={`color-orb-center w-12 h-12 ${currentColor}`}
-          style={{
-            background: `radial-gradient(circle, ${COLOR_HEX[currentColor]}BB 0%, ${COLOR_HEX[currentColor]} 60%, ${COLOR_HEX[currentColor]}88 100%)`,
-            boxShadow: `0 0 24px ${COLOR_HEX[currentColor]}BB, 0 0 48px ${COLOR_HEX[currentColor]}55`,
-          }}
-        />
-        <span className="text-white/50 text-xs font-mono uppercase tracking-widest">
-          {currentColor}
-        </span>
-      </div>
-
-      {/* Draw pile count — top left */}
-      <div className="absolute top-4 left-4 glass-panel px-3 py-2 text-center">
-        <div className="text-casino-gold/80 text-xs font-mono">{game.deck.length}</div>
-        <div className="text-white/30 text-[10px]">Deck</div>
-      </div>
-
-      {/* Draw stack badge */}
-      {game.drawStack > 0 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 glass-panel px-4 py-2 animate-bounce-uno">
-          <div className="text-card-red font-display text-lg font-bold">
-            +{game.drawStack}
-          </div>
+    <div className="hud-overlay">
+      {/* Top bar: direction + draw stack */}
+      <div className="hud-top-bar">
+        <div className="hud-direction" title={direction === 1 ? 'Clockwise' : 'Counter-clockwise'}>
+          <span style={{ fontSize: 22, transform: direction === -1 ? 'scaleX(-1)' : 'none', display: 'inline-block' }}>↻</span>
+          <span className="hud-label">Turn Order</span>
         </div>
-      )}
 
-      {/* Active player indicator */}
-      <div className="absolute top-4 right-4 glass-panel px-3 py-2 flex items-center gap-2">
-        <div
-          className="w-2 h-2 rounded-full animate-pulse"
-          style={{ background: currentPlayer?.signatureColor ?? '#D4AF37' }}
-        />
-        <span className="text-white/70 text-xs font-medium">
-          {isMyTurn ? 'Your Turn' : `${currentPlayer?.name}'s Turn`}
-        </span>
+        {drawStack > 0 && (
+          <div className="hud-draw-stack" style={{ background: COLOR_HEX[activeColor] + '33', borderColor: COLOR_HEX[activeColor] }}>
+            <span className="hud-draw-stack-count">+{drawStack}</span>
+            <span className="hud-label">Draw Stack</span>
+          </div>
+        )}
+
+        {/* Active color indicator */}
+        <div className="hud-color-orb-container">
+          <div
+            className="hud-color-orb"
+            style={{ background: COLOR_HEX[activeColor], boxShadow: `0 0 18px ${COLOR_HEX[activeColor]}` }}
+          />
+          <span className="hud-label">{activeColor.toUpperCase()}</span>
+        </div>
+      </div>
+
+      {/* Bottom: current player + deck draw button */}
+      <div className="hud-bottom">
+        {isHumanTurn && (
+          <div className="hud-actions" style={{ marginBottom: '100px' }}>
+            <p className="hud-instruction glow-text">
+              {anim.selectedCardId
+                ? 'Click again to play!'
+                : 'Your Turn!'}
+            </p>
+          </div>
+        )}
+
+        <button
+           className="uno-button"
+           onClick={() => alert("UNO! (Not fully implemented)")}
+        >
+          <span className="uno-button-text">CALL<br/>UNO</span>
+        </button>
       </div>
 
       {/* Turn timer */}
-      {isMyTurn && (
-        <div className="absolute top-16 right-4 pointer-events-none">
-          <TurnTimer durationSeconds={15} />
-        </div>
-      )}
-
-      {/* Bottom action bar */}
-      {isMyTurn && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 pointer-events-auto">
-          {canDraw && !hasPlayableCard && (
-            <button className="btn-gold px-6 py-3 text-sm" onClick={handleDrawCard}>
-              Draw Card
-            </button>
-          )}
-          {canDraw && hasPlayableCard && game.drawStack > 0 && (
-            <button className="btn-ghost px-6 py-3 text-sm" onClick={handleDrawCard}>
-              Draw +{game.drawStack}
-            </button>
-          )}
-          {isMyTurn && !hasPlayableCard && (
-            <button className="btn-ghost px-4 py-3 text-sm text-white/50" onClick={handlePass}>
-              Pass
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* UNO Button */}
-      {showUnoButton && (
-        <div className="absolute bottom-6 right-6 pointer-events-auto">
-          <UnoButton />
-        </div>
-      )}
-
-      {/* Wild color picker */}
-      {pendingWildColor && (
-        <div className="pointer-events-auto">
-          <ColorPicker />
-        </div>
-      )}
-
-      {/* Toasts */}
-      <ToastList toasts={toasts} />
+      {isHumanTurn && <TurnTimer startedAt={gameState.turnStartedAt} />}
     </div>
-  );
+  )
 }
 
-function ToastList({ toasts }: { toasts: any[] }) {
+// ── Turn Timer ───────────────────────────────────────────────────────────────
+function TurnTimer({ startedAt }: { startedAt: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null!)
+  const timeoutMs = TIMING.TURN_TIMEOUT_MS
+  const drawCardAction = useStore(s => s.drawCardAction)
+
+  useEffect(() => {
+    let raf: number
+    const draw = () => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')!
+      const W = canvas.width
+      const elapsed = Date.now() - startedAt
+      const progress = Math.max(0, 1 - elapsed / timeoutMs)
+
+      ctx.clearRect(0, 0, W, W)
+
+      // Background ring
+      ctx.beginPath()
+      ctx.arc(W / 2, W / 2, W / 2 - 4, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)'
+      ctx.lineWidth = 5
+      ctx.stroke()
+
+      // Progress arc
+      const startAngle = -Math.PI / 2
+      const endAngle = startAngle + progress * Math.PI * 2
+      const hue = progress * 120  // green → red
+      ctx.beginPath()
+      ctx.arc(W / 2, W / 2, W / 2 - 4, startAngle, endAngle)
+      ctx.strokeStyle = `hsl(${hue}, 80%, 55%)`
+      ctx.lineWidth = 5
+      ctx.lineCap = 'round'
+      ctx.stroke()
+
+      // Text
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 13px Inter'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`${Math.ceil(progress * (timeoutMs / 1000))}s`, W / 2, W / 2)
+
+      if (progress > 0) {
+        raf = requestAnimationFrame(draw)
+      } else {
+        // Auto-draw on timeout
+        drawCardAction()
+      }
+    }
+    raf = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(raf)
+  }, [startedAt, timeoutMs, drawCardAction])
+
   return (
-    <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col gap-2 items-center pointer-events-none z-50">
-      {toasts.map((t) => <Toast key={t.id} toast={t} />)}
-    </div>
-  );
+    <canvas
+      ref={canvasRef}
+      width={56}
+      height={56}
+      className="hud-timer-canvas"
+    />
+  )
 }

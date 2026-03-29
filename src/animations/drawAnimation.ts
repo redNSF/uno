@@ -1,34 +1,46 @@
+import gsap from 'gsap'
+import type { Vec3 } from '../utils/math'
+import { bezierQuad, arcMid } from '../utils/math'
+import { TIMING, SCENE } from '../utils/constants'
+
+export interface DrawAnimTarget {
+  setPosition: (x: number, y: number, z: number) => void
+  setFaceUp?: (v: boolean) => void
+}
+
 /**
- * drawAnimation.ts — Draw card snap animation
+ * Snap a card from the deck to a player's hand position with a flip.
  */
-
-import gsap from 'gsap';
-import * as THREE from 'three';
-
 export function drawAnimation(
-  cardMesh: THREE.Object3D,
-  deckPos: THREE.Vector3,
-  targetPos: THREE.Vector3,
-  faceUp: boolean,
-  onComplete?: () => void
-): void {
-  cardMesh.position.copy(deckPos);
-  cardMesh.rotation.set(0, 0, 0);
+  target: DrawAnimTarget,
+  toPos: Vec3,
+  isHuman = false,
+  onComplete?: () => void,
+): gsap.core.Timeline {
+  const fromPos: Vec3 = {
+    x: SCENE.DECK_POSITION[0],
+    y: SCENE.DECK_POSITION[1],
+    z: SCENE.DECK_POSITION[2],
+  }
+  const mid = arcMid(fromPos, toPos, 1.8)
+  const progress = { t: 0 }
 
-  const mid = new THREE.Vector3(
-    (deckPos.x + targetPos.x) / 2,
-    Math.max(deckPos.y, targetPos.y) + 1.0,
-    (deckPos.z + targetPos.z) / 2
-  );
+  const tl = gsap.timeline({ onComplete })
 
-  gsap.timeline({ onComplete }).to(cardMesh.position, {
-    keyframes: [
-      { x: mid.x, y: mid.y, z: mid.z, duration: 0.2, ease: 'power2.out' },
-      { x: targetPos.x, y: targetPos.y, z: targetPos.z, duration: 0.15, ease: 'power2.in' },
-    ],
-  }).to(cardMesh.rotation, {
-    y: faceUp ? Math.PI : 0,
-    duration: 0.2,
-    ease: 'power1.inOut',
-  }, '-=0.2');
+  tl.to(progress, {
+    t: 1,
+    duration: TIMING.CARD_ARC_MS / 1000 * 0.7,
+    ease: 'power2.out',
+    onUpdate() {
+      const pos = bezierQuad(fromPos, mid, toPos, progress.t)
+      target.setPosition(pos.x, pos.y, pos.z)
+    },
+  })
+
+  // Flip face-up for human player at arc midpoint
+  if (isHuman) {
+    tl.call(() => target.setFaceUp?.(true), [], '-=0.15')
+  }
+
+  return tl
 }

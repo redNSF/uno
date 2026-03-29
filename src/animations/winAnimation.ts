@@ -1,40 +1,42 @@
-/**
- * winAnimation.ts — Win sequence: bloom flood + camera flyout
- */
+import gsap from 'gsap'
 
-import gsap from 'gsap';
-import * as THREE from 'three';
-
-export function playWinAnimation(camera: THREE.Camera, onComplete?: () => void): void {
-  const startPos = camera.position.clone();
-  const tl = gsap.timeline({ onComplete });
-
-  // Camera pulls back and up dramatically
-  tl.to(camera.position, {
-    y: startPos.y + 4,
-    z: startPos.z + 6,
-    duration: 1.5,
-    ease: 'power2.out',
-  })
-  .to(camera.position, {
-    y: startPos.y + 2,
-    duration: 1.0,
-    ease: 'power2.inOut',
-  });
+export interface WinAnimContext {
+  bloomIntensity: { value: number }
+  cameraPosition: { y: number; z: number }
+  onConfetti: () => void
 }
 
-export function playLoseAnimation(camera: THREE.Camera, onComplete?: () => void): void {
-  const startPos = camera.position.clone();
+/**
+ * Win sequence:
+ * 1. Confetti launch (physics via Particles component)
+ * 2. Bloom flood
+ * 3. Camera fly-out
+ */
+export function winAnimation(ctx: WinAnimContext, onComplete?: () => void): gsap.core.Timeline {
+  const tl = gsap.timeline({ onComplete })
 
-  gsap.timeline({ onComplete })
-    .to(camera.position, {
-      y: startPos.y - 1,
-      duration: 0.5,
-      ease: 'power3.in',
-    })
-    .to(camera.position, {
-      y: startPos.y,
-      duration: 0.8,
-      ease: 'elastic.out(1, 0.5)',
-    });
+  // Trigger confetti
+  tl.call(() => ctx.onConfetti())
+
+  // Bloom flood
+  tl.to(ctx.bloomIntensity, {
+    value: 2.8,
+    duration: 0.6,
+    ease: 'power2.in',
+  })
+  tl.to(ctx.bloomIntensity, {
+    value: 0.8,
+    duration: 1.2,
+    ease: 'power2.out',
+  })
+
+  // Camera pull-back
+  tl.to(ctx.cameraPosition, {
+    y: ctx.cameraPosition.y + 2.5,
+    z: ctx.cameraPosition.z + 3,
+    duration: 1.8,
+    ease: 'power3.inOut',
+  }, '-=1.2')
+
+  return tl
 }

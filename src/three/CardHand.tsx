@@ -1,67 +1,94 @@
-/**
- * CardHand.tsx — Fan-arc hand layout per seat
- */
-
-import React, { useState } from 'react';
-import { Card as CardType } from '../game/logic';
-import { Card } from './Card';
+import { useMemo } from 'react'
+import type { Player } from '../game/logic'
+import type { SeatTransform } from '../utils/seatLayout'
+import { getHandPosition } from '../utils/seatLayout'
+import { SCENE } from '../utils/constants'
+import { Card } from './Card'
+import { useStore } from '../game/store'
 
 interface CardHandProps {
-  cards: CardType[];
-  faceUp: boolean;
-  position: [number, number, number];
-  baseRotation: number; // Y rotation to face table center
-  playableCardIds?: Set<string>;
-  selectedCardId?: string | null;
-  onCardClick?: (card: CardType) => void;
+  player: Player
+  seatTransform: SeatTransform
+  isHuman: boolean
+  isActive: boolean
 }
 
-const MAX_ARC_DEG = 30;
-const SPREAD_COMPRESS_THRESHOLD = 10;
+export function CardHand({ player, seatTransform, isHuman, isActive }: CardHandProps) {
+  const hoveredCardId = useStore(s => s.anim.hoveredCardId)
+  const selectedCardId = useStore(s => s.anim.selectedCardId)
+  const setHoveredCard = useStore(s => s.setHoveredCard)
+  const setSelectedCard = useStore(s => s.setSelectedCard)
+  const playCardAction = useStore(s => s.playCardAction)
+  const gameState = useStore(s => s.gameState)
 
-export function CardHand({
-  cards,
-  faceUp,
-  position,
-  baseRotation,
-  playableCardIds = new Set(),
-  selectedCardId = null,
-  onCardClick,
-}: CardHandProps) {
-  const count = cards.length;
-  if (count === 0) return null;
+  const handPos = getHandPosition(seatTransform)
+  const handCount = player.hand.length
 
-  const arcDeg = Math.min(MAX_ARC_DEG, count * 3.5);
-  const arcRad = (arcDeg * Math.PI) / 180;
-  const radius = Math.max(2.5, count * 0.22);
-  const cardScale = count > 12 ? Math.max(0.6, 1 - (count - 10) * 0.04) : 1.0;
+  // Fan arc parameters
+  const maxFanAngle = Math.min(0.8, handCount * 0.07)
+  const baseRotY = seatTransform.rotation
+
+  // Card positions along fan arc
+  const cardTransforms = useMemo(() => {
+    return player.hand.map((card, i) => {
+      const t = handCount <= 1 ? 0.5 : i / (handCount - 1)
+
+      if (isHuman) {
+        // Flat, wide layout across the bottom of the camera view
+        const spreadWidth = Math.min(8.0, handCount * 0.8)
+        const x = -spreadWidth / 2 + t * spreadWidth
+        const y = 0.5 + i * 0.002
+        const z = 4.0 // Push closer to camera
+        const rotZ = (0.5 - t) * 0.3 // Fan spread
+        const rotY = 0
+        const rotX = -Math.PI * 0.38 // Tilt heavily back to face high camera
+        return { card, x, y, z, rotY, rotZ, rotX }
+      }
+
+      const angle = -maxFanAngle / 2 + t * maxFanAngle
+      const radius = Math.max(0.9, handCount * 0.09)
+
+      // Arc position around hand center
+      const x = handPos.x + Math.sin(baseRotY + angle) * radius * 0.45
+      const z = handPos.z + Math.cos(baseRotY + angle) * radius * 0.45
+      const y = 0.05 + i * 0.001  // slight Y stagger to avoid z-fighting
+
+      // Fan tilt rotation
+      const rotZ = angle * 0.4
+      const rotY = baseRotY + angle * 0.15
+      const rotX = -Math.PI * 0.05 // default slight tilt
+
+      return { card, x, y, z, rotY, rotZ, rotX }
+    })
+  }, [player.hand, handPos, baseRotY, maxFanAngle, handCount, isHuman])
+
+  const handleCardClick = async (cardId: string) => {
+    if (!isHuman || !isActive) return
+    if (selectedCardId === cardId) {
+      // Second click: play
+      await playCardAction(cardId)
+      setSelectedCard(null)
+    } else {
+      setSelectedCard(cardId)
+    }
+  }
 
   return (
-    <group position={position} rotation={[0, baseRotation, 0]}>
-      {cards.map((card, i) => {
-        const t = count === 1 ? 0 : (i / (count - 1)) * 2 - 1; // -1 to 1
-        const theta = t * arcRad * 0.5;
-        const x = Math.sin(theta) * radius;
-        const y = Math.cos(theta) * 0.1 - 0.05; // slight arc height
-        const z = -i * 0.002; // slight z-offset for correct layering
-
-        const cardRotY = -theta;
-        const cardRotZ = t * -0.08;
-
-        return (
-          <Card
-            key={card.id}
-            card={card}
-            faceUp={faceUp}
-            position={[x, y, z]}
-            rotation={[0, cardRotY, cardRotZ]}
-            scale={cardScale}
-            isPlayable={faceUp && playableCardIds.has(card.id)}
-            isSelected={card.id === selectedCardId}
-            onClick={faceUp ? onCardClick : undefined}
-          />
-        );
-      })}
+    <group>
+      {cardTransforms.map(({ card, x, y, z, rotY, rotZ, rotX }) => (
+        <Card
+          key={card.id}
+          card={card}
+          faceUp={isHuman}
+          position={[x, y, z]}
+          rotation={[rotX, rotY, rotZ]}
+          isHuman={isHuman && isActive}
+          isHovered={hoveredCardId === card.id}
+          isSelected={selectedCardId === card.id}
+          onHover={hovered => setHoveredCard(hovered ? card.id : null)}
+          onClick={() => handleCardClick(card.id)}
+        />
+      ))}
     </group>
-  );
+  )
 }

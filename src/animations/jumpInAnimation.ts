@@ -1,38 +1,37 @@
+import gsap from 'gsap'
+import type { Vec3 } from '../utils/math'
+import { bezierQuad } from '../utils/math'
+
+export interface JumpInTarget {
+  setPosition: (x: number, y: number, z: number) => void
+  setVisible: (v: boolean) => void
+}
+
 /**
- * jumpInAnimation.ts — Jump-in card fire animation
+ * Card fires in from off-screen to the discard pile.
  */
+export function jumpInAnimation(
+  target: JumpInTarget,
+  discardPos: Vec3,
+  onComplete?: () => void,
+): gsap.core.Timeline {
+  const from: Vec3 = { x: -6, y: 3, z: -2 }
+  const mid: Vec3 = { x: (from.x + discardPos.x) / 2, y: 4.5, z: (from.z + discardPos.z) / 2 }
+  const progress = { t: 0 }
+  const tl = gsap.timeline({ onComplete })
 
-import gsap from 'gsap';
-import * as THREE from 'three';
+  target.setVisible(true)
+  target.setPosition(from.x, from.y, from.z)
 
-export function jumpInCardAnimation(
-  cardMesh: THREE.Object3D,
-  discardPos: THREE.Vector3,
-  originSeatPos: THREE.Vector3,
-  onComplete?: () => void
-): void {
-  // Card fires in from off-seat position with whip-pan energy
-  const offscreen = originSeatPos.clone().add(new THREE.Vector3(0, 0, -3));
+  tl.to(progress, {
+    t: 1,
+    duration: 0.55,
+    ease: 'power3.out',
+    onUpdate() {
+      const pos = bezierQuad(from, mid, discardPos, progress.t)
+      target.setPosition(pos.x, pos.y, pos.z)
+    },
+  })
 
-  cardMesh.position.copy(offscreen);
-  cardMesh.scale.setScalar(1.2);
-
-  gsap.timeline({ onComplete })
-    .to(cardMesh.position, {
-      x: discardPos.x,
-      y: discardPos.y + 0.6,
-      z: discardPos.z,
-      duration: 0.2,
-      ease: 'power4.out',
-    })
-    .to(cardMesh.position, {
-      y: discardPos.y,
-      duration: 0.08,
-      ease: 'power3.in',
-    })
-    .to(cardMesh.scale, {
-      x: 1, y: 1, z: 1,
-      duration: 0.15,
-      ease: 'elastic.out(1.5, 0.4)',
-    }, '-=0.1');
+  return tl
 }

@@ -1,108 +1,79 @@
-/**
- * Particles.tsx — Confetti / win-screen particle system
- */
+import { useRef, useMemo } from 'react'
+import { useFrame } from '@react-three/fiber'
+import * as THREE from 'three'
 
-import React, { useRef, useMemo, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
+const PARTICLE_COUNT = 300
 
-const CONFETTI_COUNT = 300;
-const COLORS = ['#E53E3E', '#3182CE', '#38A169', '#ECC94B', '#8B00FF', '#FF007F', '#FFFFFF', '#D4AF37'];
+export function Particles() {
+  const meshRef = useRef<THREE.InstancedMesh>(null!)
+  const dummy = useMemo(() => new THREE.Object3D(), [])
 
-interface ParticlesProps {
-  active: boolean;
-}
+  // Initial particle state
+  const particles = useMemo(() => {
+    return Array.from({ length: PARTICLE_COUNT }, () => ({
+      position: new THREE.Vector3(
+        (Math.random() - 0.5) * 0.4,
+        0.1,
+        (Math.random() - 0.5) * 0.4,
+      ),
+      velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 5,
+        Math.random() * 8 + 4,
+        (Math.random() - 0.5) * 5,
+      ),
+      color: new THREE.Color().setHSL(Math.random(), 0.9, 0.6),
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 6,
+      life: 1.0,
+      lifeSpeed: 0.3 + Math.random() * 0.4,
+    }))
+  }, [])
 
-export function Particles({ active }: ParticlesProps) {
-  const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-
-  // Physics world
-  const worldRef = useRef<CANNON.World | null>(null);
-  const bodiesRef = useRef<CANNON.Body[]>([]);
-  const colorBuffer = useMemo(() => {
-    const arr = new Float32Array(CONFETTI_COUNT * 3);
-    for (let i = 0; i < CONFETTI_COUNT; i++) {
-      const c = new THREE.Color(COLORS[i % COLORS.length]);
-      arr[i * 3] = c.r;
-      arr[i * 3 + 1] = c.g;
-      arr[i * 3 + 2] = c.b;
-    }
-    return arr;
-  }, []);
-
-  useEffect(() => {
-    if (!active) return;
-
-    // Initialize physics
-    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.8, 0) });
-    worldRef.current = world;
-
-    const bodies: CANNON.Body[] = [];
-    for (let i = 0; i < CONFETTI_COUNT; i++) {
-      const body = new CANNON.Body({
-        mass: 0.002,
-        shape: new CANNON.Box(new CANNON.Vec3(0.05, 0.05, 0.005)),
-        linearDamping: 0.3,
-        angularDamping: 0.3,
-      });
-      // Launch upward with random spread
-      body.position.set(
-        (Math.random() - 0.5) * 2,
-        0.5,
-        (Math.random() - 0.5) * 2
-      );
-      body.velocity.set(
-        (Math.random() - 0.5) * 8,
-        Math.random() * 12 + 4,
-        (Math.random() - 0.5) * 8
-      );
-      body.angularVelocity.set(
-        Math.random() * 10,
-        Math.random() * 10,
-        Math.random() * 10
-      );
-      world.addBody(body);
-      bodies.push(body);
-    }
-    bodiesRef.current = bodies;
-
-    return () => {
-      for (const b of bodies) world.removeBody(b);
-      worldRef.current = null;
-      bodiesRef.current = [];
-    };
-  }, [active]);
+  const colors = useMemo(() => {
+    const c = new Float32Array(PARTICLE_COUNT * 3)
+    particles.forEach((p, i) => {
+      c[i * 3] = p.color.r
+      c[i * 3 + 1] = p.color.g
+      c[i * 3 + 2] = p.color.b
+    })
+    return c
+  }, [particles])
 
   useFrame((_, delta) => {
-    if (!active || !worldRef.current || !meshRef.current) return;
-    worldRef.current.step(1 / 60, delta, 3);
+    if (!meshRef.current) return
 
-    bodiesRef.current.forEach((body, i) => {
-      dummy.position.set(body.position.x, body.position.y, body.position.z);
-      dummy.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
-      dummy.scale.set(0.12, 0.12, 0.004);
-      dummy.updateMatrix();
-      meshRef.current.setMatrixAt(i, dummy.matrix);
+    particles.forEach((p, i) => {
+      p.life = Math.max(0, p.life - delta * p.lifeSpeed)
+      if (p.life <= 0) {
+        // Respawn
+        p.position.set((Math.random() - 0.5) * 0.4, 0.1, (Math.random() - 0.5) * 0.4)
+        p.velocity.set(
+          (Math.random() - 0.5) * 5,
+          Math.random() * 8 + 4,
+          (Math.random() - 0.5) * 5,
+        )
+        p.life = 1.0
+      }
 
-      // Fade out pieces below table
-      const opacity = body.position.y > -5 ? 1 : 0;
-    });
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
+      // Physics
+      p.velocity.y -= 9.8 * delta
+      p.position.addScaledVector(p.velocity, delta)
+      p.rotation += p.rotSpeed * delta
 
-  if (!active) return null;
+      dummy.position.copy(p.position)
+      dummy.rotation.set(p.rotation, p.rotation * 0.6, 0)
+      dummy.scale.setScalar(0.06 * p.life)
+      dummy.updateMatrix()
+      meshRef.current.setMatrixAt(i, dummy.matrix)
+    })
+
+    meshRef.current.instanceMatrix.needsUpdate = true
+  })
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, CONFETTI_COUNT]} castShadow>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial
-        vertexColors
-        roughness={0.8}
-        metalness={0.1}
-        side={THREE.DoubleSide}
-      />
+    <instancedMesh ref={meshRef} args={[undefined, undefined, PARTICLE_COUNT]}>
+      <planeGeometry args={[1, 1]} />
+      <meshBasicMaterial vertexColors transparent depthWrite={false} side={THREE.DoubleSide} />
     </instancedMesh>
-  );
+  )
 }

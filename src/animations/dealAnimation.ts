@@ -1,103 +1,58 @@
-/**
- * dealAnimation.ts — Bezier arc deal animation via GSAP
- */
+import gsap from 'gsap'
+import type { Vec3 } from '../utils/math'
+import { bezierQuad, arcMid } from '../utils/math'
+import { TIMING, SCENE } from '../utils/constants'
 
-import gsap from 'gsap';
-import * as THREE from 'three';
-
-export interface DealTarget {
-  mesh: THREE.Object3D;
-  toPosition: THREE.Vector3;
-  toRotation: THREE.Euler;
-  delay: number;
-  faceUp: boolean;
+export interface AnimTarget {
+  setPosition: (x: number, y: number, z: number) => void
+  setRotation?: (x: number, y: number, z: number) => void
 }
 
 /**
- * Animate cards dealing from deck position to each seat
- * Uses bezier arc via GSAP motion path
+ * Deal animation: arc card from deck position to target seat position.
+ * @param target  - Object with setPosition / setRotation callbacks
+ * @param seatPos - Destination position (seat hand area)
+ * @param cardIndex - Stagger index (0-based)
+ * @param onComplete - Called when animation fully lands
  */
-export function playDealAnimation(
-  targets: DealTarget[],
-  deckPosition: THREE.Vector3,
-  onComplete?: () => void
-): void {
-  const tl = gsap.timeline({ onComplete });
+export function dealAnimation(
+  target: AnimTarget,
+  seatPos: Vec3,
+  cardIndex: number,
+  onComplete?: () => void,
+): gsap.core.Tween {
+  const from: Vec3 = { x: SCENE.DECK_POSITION[0], y: SCENE.DECK_POSITION[1], z: SCENE.DECK_POSITION[2] }
+  from.y += cardIndex * SCENE.CARD_DEPTH * 1.5
+  const mid = arcMid(from, seatPos, 2.2)
 
-  targets.forEach((t, i) => {
-    const { mesh, toPosition, toRotation, delay } = t;
-
-    // Start at deck
-    mesh.position.copy(deckPosition);
-    mesh.rotation.set(0, 0, 0);
-    mesh.scale.setScalar(0.8);
-
-    tl.to(mesh.position, {
-      x: toPosition.x,
-      y: toPosition.y + 1.2, // arc peak
-      z: toPosition.z,
-      duration: 0.25,
-      ease: 'power2.out',
-      delay: delay,
-    }, i * 0.08)
-    .to(mesh.position, {
-      x: toPosition.x,
-      y: toPosition.y,
-      z: toPosition.z,
-      duration: 0.15,
-      ease: 'power2.in',
-    }, `>`)
-    .to(mesh.rotation, {
-      y: t.faceUp ? Math.PI : 0,
-      duration: 0.2,
-      ease: 'power1.inOut',
-    }, `-=0.1`)
-    .to(mesh.scale, {
-      x: 1, y: 1, z: 1,
-      duration: 0.15,
-      ease: 'elastic.out(1, 0.5)',
-    }, `-=0.2`);
-  });
+  const progress = { t: 0 }
+  return gsap.to(progress, {
+    t: 1,
+    duration: TIMING.CARD_ARC_MS / 1000,
+    delay: cardIndex * (TIMING.DEAL_STAGGER_MS / 1000),
+    ease: 'power2.out',
+    onUpdate() {
+      const pos = bezierQuad(from, mid, seatPos, progress.t)
+      target.setPosition(pos.x, pos.y, pos.z)
+    },
+    onComplete() {
+      target.setPosition(seatPos.x, seatPos.y, seatPos.z)
+      onComplete?.()
+    },
+  })
 }
 
 /**
- * Simple arc from A to B with a peak
+ * Deals a full initial hand to all players.
+ * Returns a timeline that completes after all cards are dealt.
  */
-export function tweenCardArc(
-  mesh: THREE.Object3D,
-  from: THREE.Vector3,
-  to: THREE.Vector3,
-  duration: number = 0.4,
-  onComplete?: () => void
-): void {
-  const midY = Math.max(from.y, to.y) + 1.5;
-
-  gsap.to(mesh.position, {
-    keyframes: [
-      { x: from.x, y: from.y, z: from.z, duration: 0 },
-      { x: (from.x + to.x) / 2, y: midY, z: (from.z + to.z) / 2, duration: duration * 0.5, ease: 'power2.out' },
-      { x: to.x, y: to.y, z: to.z, duration: duration * 0.5, ease: 'power2.in' },
-    ],
-    ease: 'none',
-    onComplete,
-  });
-}
-
-/**
- * Camera shake on card slam
- */
-export function cameraShake(camera: THREE.Camera, intensity: number = 0.15, duration: number = 0.3): void {
-  const origin = camera.position.clone();
-  const tl = gsap.timeline();
-
-  for (let i = 0; i < 6; i++) {
-    tl.to(camera.position, {
-      x: origin.x + (Math.random() - 0.5) * intensity,
-      y: origin.y + (Math.random() - 0.5) * intensity,
-      z: origin.z,
-      duration: duration / 6,
-      ease: 'none',
-    });
+export function dealAllAnimation(
+  targets: { target: AnimTarget; seatPos: Vec3; cardIndex: number }[],
+  onComplete?: () => void,
+): gsap.core.Timeline {
+  const tl = gsap.timeline({ onComplete })
+  for (const { target, seatPos, cardIndex } of targets) {
+    tl.add(dealAnimation(target, seatPos, cardIndex), cardIndex * (TIMING.DEAL_STAGGER_MS / 1000))
   }
-  tl.to(camera.position, { x: origin.x, y: origin.y, z: origin.z, duration: 0.05 });
+  return tl
 }

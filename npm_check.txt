@@ -1,7 +1,0 @@
-﻿uno-cinematic@1.0.0 C:\Users\riyad\OneDrive\Documents\GitHub\uno
-Γö£ΓöÇΓö¼ @vitejs/plugin-react@4.7.0
-Γöé ΓööΓöÇΓöÇ vite@5.4.21 deduped
-Γö£ΓöÇΓö¼ vite-plugin-glsl@1.5.6
-Γöé ΓööΓöÇΓöÇ vite@5.4.21 deduped
-ΓööΓöÇΓöÇ vite@5.4.21
-

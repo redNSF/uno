@@ -1,48 +1,30 @@
-// card.frag.glsl — Holographic foil shader for wild cards
+// ─── Holographic Card Fragment Shader ─────────────────────────────────────
 varying vec2 vUv;
 varying vec3 vNormal;
-varying vec3 vPosition;
 varying vec3 vViewDir;
 
 uniform float uTime;
-uniform sampler2D uCardTexture;
-uniform float uHoloStrength;
-uniform vec3 uBaseColor;
+uniform sampler2D uFaceTexture;
+uniform float uHoloIntensity;  // 0 = normal card, 1 = full holo wild
 
-// Fresnel
-float fresnel(vec3 N, vec3 V, float power) {
-  return pow(1.0 - clamp(dot(N, V), 0.0, 1.0), power);
-}
-
-// Rainbow from hue shift
+// ── Rainbow Iridescence ────────────────────────────────────────────────────
 vec3 rainbow(float t) {
-  vec3 c = vec3(
-    sin(t * 6.283) * 0.5 + 0.5,
-    sin(t * 6.283 + 2.094) * 0.5 + 0.5,
-    sin(t * 6.283 + 4.189) * 0.5 + 0.5
-  );
-  return c;
+  return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.33, 0.67)));
 }
 
 void main() {
-  vec3 N = normalize(vNormal);
-  vec3 V = normalize(-vPosition);
+  vec4 faceColor = texture2D(uFaceTexture, vUv);
 
-  // Sample card texture
-  vec4 texColor = texture2D(uCardTexture, vUv);
+  // Fresnel
+  float ndv = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+  float fresnel = pow(1.0 - ndv, 2.5);
 
-  // Holographic fresnel
-  float f = fresnel(N, V, 2.5);
-  float hueShift = vUv.x * 0.6 + vUv.y * 0.4 + uTime * 0.15;
-  vec3 holo = rainbow(hueShift) * f * uHoloStrength;
+  // Animated UV shift for the foil shimmer
+  vec2 foilUv = vUv + vec2(sin(uTime * 0.5) * 0.02, cos(uTime * 0.4) * 0.02);
+  float foilGrad = foilUv.x * 0.6 + foilUv.y * 0.4 + uTime * 0.08;
+  vec3 holo = rainbow(foilGrad) * (fresnel + 0.2);
 
-  // Animated UV shimmer lines
-  float lines = sin(vUv.y * 40.0 + uTime * 2.0) * 0.5 + 0.5;
-  holo += vec3(lines * 0.08 * f);
+  vec3 color = mix(faceColor.rgb, faceColor.rgb + holo * 0.6, uHoloIntensity * fresnel);
 
-  // Composite
-  vec3 finalColor = texColor.rgb + holo;
-  float alpha = texColor.a;
-
-  gl_FragColor = vec4(finalColor, alpha);
+  gl_FragColor = vec4(color, faceColor.a);
 }

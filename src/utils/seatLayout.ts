@@ -1,121 +1,52 @@
-// ============================================
-// Seat Layout Calculator
-// Computes 3D seat positions for 2–7 players
-// around an oval table
-// ============================================
+import { SCENE } from './constants'
+import type { Vec3 } from './math'
 
-import { SCENE, MAX_PLAYERS } from './constants';
-import * as THREE from 'three';
-
-export interface SeatLayout {
-  position: THREE.Vector3;
-  /** Angle in radians — 0 = bottom (human seat, toward camera) */
-  angle: number;
-  /** Euler Y rotation for the seat nameplate/chair to face table center */
-  rotation: [number, number, number];
-  /** Hand fan direction — angle pointing inward toward table center */
-  handAngle: number;
-  /** For camera: how far to pull back */
-  cameraDistance: number;
-  /** Camera height */
-  cameraHeight: number;
-}
-
-// Seat angles for N players — human always at index 0 (bottom, angle = 0)
-const SEAT_ANGLE_MAPS: Record<number, number[]> = {
-  2: [0, Math.PI],
-  3: [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3],
-  4: [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2],
-  5: [0, (2 * Math.PI * 1) / 5, (2 * Math.PI * 2) / 5, (2 * Math.PI * 3) / 5, (2 * Math.PI * 4) / 5],
-  6: [0, (2 * Math.PI) / 6, (2 * Math.PI * 2) / 6, (2 * Math.PI * 3) / 6, (2 * Math.PI * 4) / 6, (2 * Math.PI * 5) / 6],
-  7: [0, (2 * Math.PI) / 7, (2 * Math.PI * 2) / 7, (2 * Math.PI * 3) / 7, (2 * Math.PI * 4) / 7, (2 * Math.PI * 5) / 7, (2 * Math.PI * 6) / 7],
-};
-
-// Camera settings by player count
-const CAMERA_PRESETS: Record<number, { distance: number; height: number }> = {
-  2: { distance: 6.5,  height: 5.0 },
-  3: { distance: 7.0,  height: 5.2 },
-  4: { distance: 7.5,  height: 5.5 },
-  5: { distance: 8.2,  height: 5.8 },
-  6: { distance: 8.8,  height: 6.2 },
-  7: { distance: 9.5,  height: 6.5 },
-};
-
-/**
- * Index 0 is always the human player at the bottom.
- */
-export function computeSeatPositions(playerCount: number): SeatLayout[] {
-  const count = Math.max(2, Math.min(MAX_PLAYERS, playerCount));
-  const angles = SEAT_ANGLE_MAPS[count] ?? SEAT_ANGLE_MAPS[7];
-  const camera = CAMERA_PRESETS[count] ?? CAMERA_PRESETS[7];
-
-  // Oval radii scale slightly with player count
-  const rx = SCENE.TABLE_BASE_RADIUS_X + (count - 2) * SCENE.TABLE_SCALE_PER_PLAYER * 3;
-  const rz = SCENE.TABLE_BASE_RADIUS_Z + (count - 2) * SCENE.TABLE_SCALE_PER_PLAYER * 2;
-
-  return angles.map((rawAngle) => {
-    // Seat angle: 0 = bottom (toward +Z, i.e., toward camera)
-    // Rotate so 0 is at +Z (front of table)
-    const angle = rawAngle - Math.PI / 2;  // shift so 0 is at bottom
-
-    // Oval position
-    const x = rx * Math.cos(angle);
-    const z = rz * Math.sin(angle);
-
-    const position = new THREE.Vector3(x, 0, z);
-
-    // Chair faces table center (inward)
-    const rotationY = -angle + Math.PI;
-
-    // Hand fan direction (cards face toward camera/player, tilted inward)
-    const handAngle = angle;
-
-    return {
-      position,
-      angle,
-      rotation: [0, rotationY, 0],
-      handAngle,
-      cameraDistance: camera.distance,
-      cameraHeight: camera.height,
-    };
-  });
+export interface SeatTransform {
+  position: Vec3
+  rotation: number   // Y-axis rotation so nameplate faces table center
+  seatIndex: number
 }
 
 /**
- * Get the 3D position for a player's hand fan center
+ * Computes evenly-spaced seat positions around an oval for N players.
+ * Player 0 (human) is always at the bottom-center (front of screen).
  */
-export function getHandPosition(seat: SeatLayout, heightOffset = 0.15): THREE.Vector3 {
-  return new THREE.Vector3(
-    seat.position.x * 0.88,
-    seat.position.y + heightOffset,
-    seat.position.z * 0.88
-  );
+export function computeSeatLayout(numPlayers: number): SeatTransform[] {
+  const seats: SeatTransform[] = []
+  const { TABLE_RX, TABLE_RZ } = SCENE
+
+  for (let i = 0; i < numPlayers; i++) {
+    // Distribute evenly, starting from the bottom (angle = PI/2 for player 0)
+    const frac = i / numPlayers
+    const angle = Math.PI / 2 + frac * 2 * Math.PI  // in radians
+
+    const x = TABLE_RX * 1.35 * Math.cos(angle)
+    const z = TABLE_RZ * 1.35 * Math.sin(angle)
+
+    // Rotation: face the origin (table center)
+    const rotation = Math.atan2(x, z) + Math.PI
+
+    seats.push({
+      position: { x, y: 0, z },
+      rotation,
+      seatIndex: i,
+    })
+  }
+
+  return seats
 }
 
 /**
- * Get point light position for a player's seat (slightly elevated)
+ * Returns the 3D position used for hand fan layout for a given seat.
+ * Slightly further from table center than the nameplate.
  */
-export function getSeatLightPosition(seat: SeatLayout): THREE.Vector3 {
-  return new THREE.Vector3(
-    seat.position.x * 0.7,
-    2.5,
-    seat.position.z * 0.7
-  );
-}
-
-/**
- * Camera position from seat layout
- */
-export function getCameraPosition(layouts: SeatLayout[]): THREE.Vector3 {
-  if (!layouts[0]) return new THREE.Vector3(0, 5.5, 7.5);
-  const { cameraDistance, cameraHeight } = layouts[0];
-  return new THREE.Vector3(0, cameraHeight, cameraDistance);
-}
-
-/**
- * Get table scale factor for given player count
- */
-export function getTableScale(playerCount: number): [number, number, number] {
-  const factor = 1 + (playerCount - 2) * 0.05;
-  return [factor, 1, factor];
+export function getHandPosition(seat: SeatTransform): Vec3 {
+  const dist = 0.25
+  const dx = Math.sin(seat.rotation) * dist
+  const dz = Math.cos(seat.rotation) * dist
+  return {
+    x: seat.position.x + dx,
+    y: 0.05,
+    z: seat.position.z + dz,
+  }
 }

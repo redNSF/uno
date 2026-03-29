@@ -1,2 +1,0 @@
-﻿src/three/Scene.tsx(67,13): error TS2322: Type 'Vector3' is not assignable to type '[number, number, number]'.
-src/three/Scene.tsx(68,13): error TS2322: Type '[number, number, number]' is not assignable to type 'number'.

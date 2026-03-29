@@ -1,90 +1,108 @@
-/**
- * DiscardPile.tsx — Top card visible with shockwave ring on play
- */
+import { useRef, useMemo, useEffect } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { RoundedBox } from '@react-three/drei'
+import * as THREE from 'three'
+import type { Card as CardType } from '../game/logic'
+import type { CardColor } from '../utils/constants'
+import { generateCardTexture } from '../textures/CardTextureGenerator'
+import { SCENE } from '../utils/constants'
 
-import React, { useRef, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import { Card as CardType } from '../game/logic';
-import { generateCardTexture } from '../textures/CardTextureGenerator';
-
-interface DiscardPileProps {
-  topCard: CardType | null;
-  position?: [number, number, number];
+const COLOR_HEX: Record<string, number> = {
+  red: 0xe02020,
+  yellow: 0xf5c817,
+  green: 0x1fb851,
+  blue: 0x1a6fff,
+  wild: 0xc084fc,
 }
 
-export function DiscardPile({ topCard, position = [1.2, 0, 0] }: DiscardPileProps) {
-  const shockwaveRef = useRef<THREE.Mesh>(null!);
-  const shockwaveActive = useRef(false);
-  const shockwaveTime = useRef(0);
-  const prevTopCard = useRef<CardType | null>(null);
+interface DiscardPileProps {
+  topCard: CardType | null
+  position: [number, number, number]
+  activeColor: CardColor
+}
 
-  // Detect new card played
+export function DiscardPile({ topCard, position, activeColor }: DiscardPileProps) {
+  const shockwaveRef = useRef<THREE.Mesh>(null!)
+  const shockwaveActive = useRef(false)
+  const shockwaveProgress = useRef(0)
+  const prevCardId = useRef<string | null>(null)
+
+  const faceTexture = useMemo(() => {
+    if (!topCard) return null
+    return generateCardTexture(topCard)
+  }, [topCard?.id])
+
+  // Trigger shockwave on new card played
   useEffect(() => {
-    if (topCard && topCard.id !== prevTopCard.current?.id) {
-      shockwaveActive.current = true;
-      shockwaveTime.current = 0;
+    if (topCard && topCard.id !== prevCardId.current) {
+      shockwaveActive.current = true
+      shockwaveProgress.current = 0
+      prevCardId.current = topCard.id
     }
-    prevTopCard.current = topCard;
-  }, [topCard?.id]);
+  }, [topCard?.id])
 
   useFrame((_, delta) => {
-    if (shockwaveRef.current && shockwaveActive.current) {
-      shockwaveTime.current += delta;
-      const t = shockwaveTime.current;
-      const s = 1 + t * 4;
-      shockwaveRef.current.scale.setScalar(s);
-      (shockwaveRef.current.material as THREE.MeshStandardMaterial).opacity = Math.max(0, 0.7 - t * 1.5);
-      if (t > 0.5) {
-        shockwaveActive.current = false;
-        shockwaveRef.current.scale.setScalar(1);
-        (shockwaveRef.current.material as THREE.MeshStandardMaterial).opacity = 0;
-      }
+    if (!shockwaveRef.current) return
+    if (shockwaveActive.current) {
+      shockwaveProgress.current += delta * 2.5
+      const p = Math.min(shockwaveProgress.current, 1)
+      const s = p * 2.5
+      shockwaveRef.current.scale.set(s, s, s)
+      ;(shockwaveRef.current.material as THREE.MeshBasicMaterial).opacity = (1 - p) * 0.6
+      if (p >= 1) shockwaveActive.current = false
     }
-  });
+  })
 
-  const texture = topCard ? generateCardTexture(topCard) : null;
+  const colorHex = COLOR_HEX[activeColor] ?? 0xffffff
 
   return (
     <group position={position}>
-      {/* Ghost cards below (depth stack) */}
-      {[-0.012, -0.006].map((z, i) => (
-        <mesh key={i} position={[0, 0, z]} rotation={[0, (i - 0.5) * 0.1, 0]}>
-          <planeGeometry args={[0.7, 1.05]} />
-          <meshStandardMaterial color="#888" roughness={0.6} opacity={0.4} transparent />
-        </mesh>
+      {/* Ghost stack layers */}
+      {[-0.02, -0.01].map((yOffset, i) => (
+        <RoundedBox
+          key={i}
+          args={[SCENE.CARD_WIDTH, SCENE.CARD_HEIGHT, SCENE.CARD_DEPTH]}
+          radius={0.005}
+          position={[i * 0.005, yOffset, i * 0.005]}
+          rotation={[-Math.PI / 2, 0, (i - 1) * 0.05]}
+        >
+          <meshLambertMaterial color={0x3a2a2a} />
+        </RoundedBox>
       ))}
 
       {/* Top card */}
-      {texture && (
-        <mesh position={[0, 0, 0]}>
-          <planeGeometry args={[0.7, 1.05]} />
-          <meshStandardMaterial map={texture} roughness={0.3} metalness={0.05} />
-        </mesh>
+      {topCard && faceTexture && (
+        <RoundedBox
+          args={[SCENE.CARD_WIDTH, SCENE.CARD_HEIGHT, SCENE.CARD_DEPTH * 1.2]}
+          radius={0.005}
+          position={[0, 0.005, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          castShadow
+        >
+          <meshLambertMaterial attach="material-4" map={faceTexture} />
+          <meshLambertMaterial attach="material-5" color={0x8b0000} />
+          <meshLambertMaterial attach="material-0" color={0xf5f0e8} />
+          <meshLambertMaterial attach="material-1" color={0xf5f0e8} />
+          <meshLambertMaterial attach="material-2" color={0xf5f0e8} />
+          <meshLambertMaterial attach="material-3" color={0xf5f0e8} />
+        </RoundedBox>
       )}
 
-      {/* Shockwave ring */}
-      <mesh ref={shockwaveRef} position={[0, 0, -0.02]} rotation={[0, 0, 0]}>
-        <ringGeometry args={[0.38, 0.44, 32]} />
-        <meshStandardMaterial
-          color={topCard?.color && topCard.color !== 'wild' ? getCardColor(topCard.color) : '#D4AF37'}
-          emissive={topCard?.color && topCard.color !== 'wild' ? getCardColor(topCard.color) : '#D4AF37'}
-          emissiveIntensity={1}
-          transparent
-          opacity={0}
-          side={THREE.DoubleSide}
+      {/* Active color orb above */}
+      <mesh position={[0, 0.35, 0]}>
+        <sphereGeometry args={[0.1, 16, 16]} />
+        <meshLambertMaterial
+          color={colorHex}
+          emissive={colorHex}
+          emissiveIntensity={1.0}
         />
       </mesh>
-    </group>
-  );
-}
 
-function getCardColor(color: string): string {
-  const map: Record<string, string> = {
-    red: '#E53E3E',
-    blue: '#3182CE',
-    green: '#38A169',
-    yellow: '#ECC94B',
-  };
-  return map[color] ?? '#D4AF37';
+      {/* Shockwave ring */}
+      <mesh ref={shockwaveRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} scale={[0, 0, 0]}>
+        <ringGeometry args={[0.3, 0.45, 48]} />
+        <meshBasicMaterial color={colorHex} transparent opacity={0} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  )
 }

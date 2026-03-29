@@ -1,204 +1,173 @@
-/**
- * AudioManager.ts — Howler.js + Web Audio API procedural audio
- * All sounds are procedurally generated — no file dependencies
- * Designed to hot-swap real audio files when added
- */
+import type { AudioTrack } from '../utils/constants'
 
-export type SoundName =
-  | 'card_deal' | 'card_play' | 'card_draw' | 'shuffle'
-  | 'skip' | 'reverse' | 'draw2' | 'wild' | 'wild4'
-  | 'uno_call' | 'jump_in' | 'win' | 'lose'
-  | 'player_join' | 'player_leave' | 'chat_ping'
-  | 'button_click' | 'color_pick';
-
-// ---- Web Audio API context ----
-let _ctx: AudioContext | null = null;
-
-function getAudioContext(): AudioContext {
-  if (!_ctx) _ctx = new AudioContext();
-  return _ctx;
-}
-
-// ---- Procedural sound generators ----
-
-function playTone(
-  frequency: number,
+// ─── Procedural Tone Generator ─────────────────────────────────────────────
+function synth(
+  ctx: AudioContext,
+  freq: number,
   duration: number,
   type: OscillatorType = 'sine',
-  gainValue: number = 0.15,
-  detune: number = 0
+  gainPeak = 0.3,
+  fadeIn = 0.01,
 ): void {
-  const ctx = getAudioContext();
-  if (ctx.state === 'suspended') ctx.resume();
-
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-
-  osc.type = type;
-  osc.frequency.setValueAtTime(frequency, ctx.currentTime);
-  osc.detune.setValueAtTime(detune, ctx.currentTime);
-
-  gain.gain.setValueAtTime(0, ctx.currentTime);
-  gain.gain.linearRampToValueAtTime(gainValue, ctx.currentTime + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-
-  osc.start(ctx.currentTime);
-  osc.stop(ctx.currentTime + duration);
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = type
+  osc.frequency.setValueAtTime(freq, ctx.currentTime)
+  gain.gain.setValueAtTime(0, ctx.currentTime)
+  gain.gain.linearRampToValueAtTime(gainPeak, ctx.currentTime + fadeIn)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + duration + 0.05)
 }
 
-function playNoise(duration: number, gainValue: number = 0.05): void {
-  const ctx = getAudioContext();
-  if (ctx.state === 'suspended') ctx.resume();
-
-  const bufferSize = ctx.sampleRate * duration;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-
-  const source = ctx.createBufferSource();
-  const gain = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.frequency.value = 2000;
-  filter.Q.value = 0.3;
-
-  source.buffer = buffer;
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(ctx.destination);
-
-  gain.gain.setValueAtTime(gainValue, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-
-  source.start();
-  source.stop(ctx.currentTime + duration);
+function noise(ctx: AudioContext, duration: number, gainPeak = 0.15): void {
+  const bufSize = ctx.sampleRate * duration
+  const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate)
+  const data = buf.getChannelData(0)
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+  const gain = ctx.createGain()
+  src.connect(gain)
+  gain.connect(ctx.destination)
+  gain.gain.setValueAtTime(gainPeak, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+  src.start()
 }
 
-// ---- Sound map ----
+// ─── Track Definitions ────────────────────────────────────────────────────
+type TrackFn = (ctx: AudioContext) => void
 
-const SOUND_GENERATORS: Record<SoundName, () => void> = {
-  card_deal: () => {
-    playNoise(0.08, 0.08);
-    playTone(800, 0.06, 'triangle', 0.08);
+const TRACKS: Partial<Record<AudioTrack, TrackFn>> = {
+  card_deal: (ctx) => {
+    synth(ctx, 820, 0.08, 'triangle', 0.2)
+    setTimeout(() => synth(ctx, 640, 0.06, 'triangle', 0.15), 40)
   },
-  card_play: () => {
-    playNoise(0.1, 0.1);
-    playTone(600, 0.12, 'triangle', 0.1);
-    setTimeout(() => playTone(900, 0.06, 'sine', 0.06), 40);
+  card_play: (ctx) => {
+    synth(ctx, 440, 0.15, 'sine', 0.3)
+    setTimeout(() => synth(ctx, 660, 0.12, 'sine', 0.25), 60)
   },
-  card_draw: () => {
-    playNoise(0.07, 0.06);
-    playTone(400, 0.08, 'triangle', 0.07);
+  card_draw: (ctx) => {
+    synth(ctx, 380, 0.12, 'triangle', 0.2)
   },
-  shuffle: () => {
-    for (let i = 0; i < 8; i++) {
-      setTimeout(() => playNoise(0.06, 0.07), i * 40);
+  shuffle: (ctx) => {
+    for (let i = 0; i < 6; i++) {
+      setTimeout(() => noise(ctx, 0.06, 0.12), i * 50)
     }
   },
-  skip: () => {
-    playTone(600, 0.12, 'sawtooth', 0.1);
-    setTimeout(() => playTone(300, 0.15, 'sawtooth', 0.08), 80);
+  skip: (ctx) => {
+    synth(ctx, 330, 0.12, 'sawtooth', 0.15)
+    setTimeout(() => synth(ctx, 220, 0.15, 'sawtooth', 0.2), 80)
   },
-  reverse: () => {
-    playTone(880, 0.08, 'sine', 0.12);
-    setTimeout(() => playTone(660, 0.08, 'sine', 0.12), 80);
-    setTimeout(() => playTone(880, 0.08, 'sine', 0.12), 160);
+  reverse: (ctx) => {
+    // Descending sweep
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain); gain.connect(ctx.destination)
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(880, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.4)
+    gain.gain.setValueAtTime(0.25, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+    osc.start(); osc.stop(ctx.currentTime + 0.45)
   },
-  draw2: () => {
-    playTone(440, 0.1, 'square', 0.08);
-    setTimeout(() => playTone(440, 0.1, 'square', 0.08), 100);
+  draw2: (ctx) => {
+    synth(ctx, 550, 0.1, 'square', 0.15)
+    setTimeout(() => synth(ctx, 550, 0.1, 'square', 0.15), 120)
   },
-  wild: () => {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') ctx.resume();
-    [261, 329, 392, 523].forEach((f, i) => {
-      setTimeout(() => playTone(f, 0.3, 'sine', 0.12), i * 60);
-    });
+  wild: (ctx) => {
+    // Prismatic chord
+    for (const [freq, delay] of [[261, 0], [329, 30], [392, 60], [523, 90]] as [number, number][]) {
+      setTimeout(() => synth(ctx, freq, 0.4, 'sine', 0.18), delay)
+    }
   },
-  wild4: () => {
-    [261, 329, 392, 523].forEach((f, i) => {
-      setTimeout(() => playTone(f, 0.4, 'sine', 0.15), i * 50);
-    });
-    setTimeout(() => playNoise(0.3, 0.12), 150);
+  wild4: (ctx) => {
+    // Big slam
+    for (const [freq, delay] of [[130, 0], [185, 40], [261, 80], [370, 120]] as [number, number][]) {
+      setTimeout(() => synth(ctx, freq, 0.55, 'sawtooth', 0.22), delay)
+    }
+    setTimeout(() => noise(ctx, 0.3, 0.18), 60)
   },
-  uno_call: () => {
-    playTone(880, 0.05, 'square', 0.2);
-    setTimeout(() => playTone(1100, 0.15, 'sine', 0.18), 60);
-    setTimeout(() => playTone(880, 0.2, 'sine', 0.15), 140);
+  uno_call: (ctx) => {
+    synth(ctx, 1047, 0.06, 'sine', 0.3)
+    setTimeout(() => synth(ctx, 1319, 0.18, 'sine', 0.35), 80)
   },
-  jump_in: () => {
-    playTone(1320, 0.05, 'sawtooth', 0.15);
-    setTimeout(() => playTone(1760, 0.12, 'sine', 0.12), 40);
+  jump_in: (ctx) => {
+    synth(ctx, 659, 0.1, 'square', 0.22)
+    setTimeout(() => synth(ctx, 880, 0.18, 'square', 0.22), 80)
   },
-  win: () => {
-    [523, 659, 784, 1047].forEach((f, i) => {
-      setTimeout(() => playTone(f, 0.5, 'sine', 0.15), i * 120);
-    });
-    setTimeout(() => playNoise(0.4, 0.1), 480);
+  win: (ctx) => {
+    const chord = [523, 659, 784, 1047]
+    chord.forEach((f, i) => setTimeout(() => synth(ctx, f, 0.8, 'sine', 0.25), i * 80))
   },
-  lose: () => {
-    [784, 659, 523, 392].forEach((f, i) => {
-      setTimeout(() => playTone(f, 0.4, 'triangle', 0.12), i * 100);
-    });
+  lose: (ctx) => {
+    synth(ctx, 349, 0.5, 'sine', 0.2)
+    setTimeout(() => synth(ctx, 261, 0.7, 'sine', 0.25), 200)
   },
-  player_join: () => {
-    playTone(660, 0.08, 'sine', 0.1);
-    setTimeout(() => playTone(880, 0.12, 'sine', 0.1), 80);
+  player_join: (ctx) => {
+    synth(ctx, 784, 0.08, 'sine', 0.2)
+    setTimeout(() => synth(ctx, 1047, 0.12, 'sine', 0.2), 80)
   },
-  player_leave: () => {
-    playTone(880, 0.08, 'sine', 0.1);
-    setTimeout(() => playTone(660, 0.12, 'sine', 0.08), 80);
+  player_leave: (ctx) => {
+    synth(ctx, 440, 0.12, 'sine', 0.2)
+    setTimeout(() => synth(ctx, 330, 0.18, 'sine', 0.2), 80)
   },
-  chat_ping: () => playTone(1200, 0.06, 'sine', 0.06),
-  button_click: () => playTone(600, 0.05, 'triangle', 0.08),
-  color_pick: () => {
-    playTone(800, 0.1, 'sine', 0.1);
-    setTimeout(() => playTone(1000, 0.08, 'sine', 0.08), 60);
+  chat_ping: (ctx) => {
+    synth(ctx, 1174, 0.06, 'triangle', 0.12)
   },
-};
+}
 
-// ---- Volume controls ----
-let _masterVolume = 1.0;
-let _sfxEnabled = true;
-let _musicEnabled = true;
+// ─── AudioManager Singleton ───────────────────────────────────────────────
+class AudioManager {
+  private ctx: AudioContext | null = null
+  private masterGain: GainNode | null = null
+  private _masterVolume = 0.85
+  private _sfxVolume = 1.0
+  private _musicVolume = 0.5
+  private enabled = true
 
-// ---- Public API ----
+  private getCtx(): AudioContext {
+    if (!this.ctx) {
+      this.ctx = new AudioContext()
+      this.masterGain = this.ctx.createGain()
+      this.masterGain.gain.value = this._masterVolume
+      this.masterGain.connect(this.ctx.destination)
+    }
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume()
+    }
+    return this.ctx
+  }
 
-export const AudioManager = {
-  play(sound: SoundName): void {
-    if (!_sfxEnabled || _masterVolume === 0) return;
+  play(track: AudioTrack): void {
+    if (!this.enabled) return
     try {
-      SOUND_GENERATORS[sound]?.();
+      const ctx = this.getCtx()
+      const fn = TRACKS[track]
+      if (fn) fn(ctx)
     } catch (e) {
-      // Silently ignore audio context errors
+      // Silently ignore — audio is non-critical
     }
-  },
+  }
 
-  setMasterVolume(vol: number): void {
-    _masterVolume = Math.max(0, Math.min(1, vol));
-  },
+  setMasterVolume(v: number) {
+    this._masterVolume = Math.max(0, Math.min(1, v))
+    if (this.masterGain) this.masterGain.gain.value = this._masterVolume
+  }
 
-  setSfxEnabled(enabled: boolean): void {
-    _sfxEnabled = enabled;
-  },
+  setEnabled(v: boolean) { this.enabled = v }
+  getMasterVolume() { return this._masterVolume }
+}
 
-  setMusicEnabled(enabled: boolean): void {
-    _musicEnabled = enabled;
-  },
+export const audioManager = new AudioManager()
 
-  getMasterVolume(): number {
-    return _masterVolume;
-  },
-
-  isSfxEnabled(): boolean {
-    return _sfxEnabled;
-  },
-
-  /** Resume context after user gesture */
-  resume(): void {
-    _ctx?.resume();
-  },
-};
+// ─── Convenience hook ──────────────────────────────────────────────────────
+export function useAudio() {
+  return {
+    play: (track: AudioTrack) => audioManager.play(track),
+    setVolume: (v: number) => audioManager.setMasterVolume(v),
+    setEnabled: (v: boolean) => audioManager.setEnabled(v),
+  }
+}

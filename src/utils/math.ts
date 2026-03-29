@@ -1,154 +1,74 @@
-// ============================================
-// Math Utilities — Bezier, Lerp, Easing
-// ============================================
-
-import * as THREE from 'three';
-
-// Linear interpolation
+// ─── Lerp ─────────────────────────────────────────────────────────────────
 export function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * Math.max(0, Math.min(1, t));
+  return a + (b - a) * t
 }
 
-// Vector3 lerp
-export function lerpV3(
-  out: THREE.Vector3,
-  a: THREE.Vector3,
-  b: THREE.Vector3,
-  t: number
-): THREE.Vector3 {
-  return out.set(
-    lerp(a.x, b.x, t),
-    lerp(a.y, b.y, t),
-    lerp(a.z, b.z, t)
-  );
+// ─── Clamp ────────────────────────────────────────────────────────────────
+export function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v))
 }
 
-// Smooth step
-export function smoothStep(t: number): number {
-  return t * t * (3 - 2 * t);
+// ─── Deg ↔ Rad ─────────────────────────────────────────────────────────────
+export const DEG2RAD = Math.PI / 180
+export const RAD2DEG = 180 / Math.PI
+export function deg(d: number) { return d * DEG2RAD }
+
+// ─── Random Helpers ────────────────────────────────────────────────────────
+export function randFloat(min: number, max: number): number {
+  return min + Math.random() * (max - min)
 }
-
-// Smooth step more aggressive
-export function smootherStep(t: number): number {
-  return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-// Elastic ease out (for card land bounce)
-export function elasticOut(t: number, amplitude = 1, period = 0.3): number {
-  if (t === 0 || t === 1) return t;
-  const s = (period / (2 * Math.PI)) * Math.asin(1 / amplitude);
-  return amplitude * Math.pow(2, -10 * t) * Math.sin(((t - s) * (2 * Math.PI)) / period) + 1;
-}
-
-// Cubic bezier curve (3D point on curve)
-export function bezierPoint(
-  t: number,
-  p0: THREE.Vector3,
-  p1: THREE.Vector3,
-  p2: THREE.Vector3,
-  p3: THREE.Vector3,
-  out: THREE.Vector3
-): THREE.Vector3 {
-  const mt = 1 - t;
-  const mt2 = mt * mt;
-  const t2 = t * t;
-  const b0 = mt2 * mt;
-  const b1 = 3 * mt2 * t;
-  const b2 = 3 * mt * t2;
-  const b3 = t2 * t;
-  return out.set(
-    b0 * p0.x + b1 * p1.x + b2 * p2.x + b3 * p3.x,
-    b0 * p0.y + b1 * p1.y + b2 * p2.y + b3 * p3.y,
-    b0 * p0.z + b1 * p1.z + b2 * p2.z + b3 * p3.z
-  );
-}
-
-// Create a bezier arc control points from src -> dst with a height peak
-export function makeDealBezier(
-  src: THREE.Vector3,
-  dst: THREE.Vector3,
-  peakHeight = 2.5
-): [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3] {
-  const mid = new THREE.Vector3().addVectors(src, dst).multiplyScalar(0.5);
-  mid.y += peakHeight;
-
-  const c1 = new THREE.Vector3(
-    src.x + (mid.x - src.x) * 0.5,
-    src.y + peakHeight * 0.7,
-    src.z + (mid.z - src.z) * 0.5
-  );
-
-  const c2 = new THREE.Vector3(
-    dst.x + (mid.x - dst.x) * 0.5,
-    dst.y + peakHeight * 0.4,
-    dst.z + (mid.z - dst.z) * 0.5
-  );
-
-  return [src.clone(), c1, c2, dst.clone()];
-}
-
-// Clamp
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-// Random in range
-export function randRange(min: number, max: number): number {
-  return min + Math.random() * (max - min);
-}
-
-// Random int in range [min, max)
 export function randInt(min: number, max: number): number {
-  return Math.floor(min + Math.random() * (max - min));
+  return Math.floor(randFloat(min, max + 1))
 }
 
-// Fisher-Yates shuffle (in-place)
-export function shuffleArray<T>(arr: T[]): T[] {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+// ─── Easing Functions ──────────────────────────────────────────────────────
+export const ease = {
+  inOutCubic: (t: number) => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2,
+  outElastic: (t: number) => {
+    const c4 = (2 * Math.PI) / 3
+    return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1
+  },
+  outBounce: (t: number) => {
+    const n1 = 7.5625, d1 = 2.75
+    if (t < 1 / d1) return n1 * t * t
+    if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75
+    if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375
+    return n1 * (t -= 2.625 / d1) * t + 0.984375
+  },
+  inOutSine: (t: number) => -(Math.cos(Math.PI * t) - 1) / 2,
+  outQuart: (t: number) => 1 - Math.pow(1 - t, 4),
+}
+
+// ─── Quadratic Bezier (for card arcs) ─────────────────────────────────────
+export interface Vec3 { x: number; y: number; z: number }
+
+export function bezierQuad(p0: Vec3, p1: Vec3, p2: Vec3, t: number): Vec3 {
+  const mt = 1 - t
+  return {
+    x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x,
+    y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y,
+    z: mt * mt * p0.z + 2 * mt * t * p1.z + t * t * p2.z,
   }
-  return arr;
 }
 
-// Convert degrees to radians
-export function deg2rad(deg: number): number {
-  return (deg * Math.PI) / 180;
+// Peak control point for card arcs
+export function arcMid(p0: Vec3, p2: Vec3, height = 2.5): Vec3 {
+  return {
+    x: (p0.x + p2.x) / 2,
+    y: Math.max(p0.y, p2.y) + height,
+    z: (p0.z + p2.z) / 2,
+  }
 }
 
-// Convert radians to degrees
-export function rad2deg(rad: number): number {
-  return (rad * 180) / Math.PI;
+// ─── Wrap Angle ────────────────────────────────────────────────────────────
+export function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= 2 * Math.PI
+  while (a < -Math.PI) a += 2 * Math.PI
+  return a
 }
 
-// Generate card fan positions in local 2D (X spread, Y height)
-// Returns array of { x, y, rotation } for each card
-export function computeHandFan(
-  cardCount: number,
-  maxAngle = 70,
-  radius = 4.5
-): Array<{ x: number; y: number; rotation: number }> {
-  if (cardCount === 0) return [];
-  if (cardCount === 1) return [{ x: 0, y: 0, rotation: 0 }];
-
-  // Compress angle as cards grow
-  const anglePerCard = Math.min(maxAngle / (cardCount - 1), 12);
-  const totalAngle = anglePerCard * (cardCount - 1);
-
-  return Array.from({ length: cardCount }, (_, i) => {
-    const angle = deg2rad(i * anglePerCard - totalAngle / 2);
-    const x = radius * Math.sin(angle);
-    const y = radius * (1 - Math.cos(angle)) * 0.15;
-    return { x, y, rotation: angle };
-  });
-}
-
-// Distance between two 3D points
-export function dist3(a: THREE.Vector3, b: THREE.Vector3): number {
-  return a.distanceTo(b);
-}
-
-// Angle between two 2D vectors
-export function angle2D(x: number, z: number): number {
-  return Math.atan2(z, x);
+// ─── Distance 3D ──────────────────────────────────────────────────────────
+export function dist3(a: Vec3, b: Vec3): number {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
+  return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }

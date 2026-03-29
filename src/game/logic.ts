@@ -1,719 +1,316 @@
-// ============================================
-// UNO Game Logic Engine — Pure, No Side Effects
-// Full 108-card standard UNO rules
-// ============================================
+import type { CardColor, CardValue } from '../utils/constants'
+import { GAME_LIMITS } from '../utils/constants'
 
-import { nanoid } from 'nanoid';
-import { shuffleArray } from '@utils/math';
-import {
-  CardColor, CardValue, GamePhase, Direction, HouseRules,
-  CARD_COLORS, CARDS_PER_HAND, DEFAULT_HOUSE_RULES,
-} from '@utils/constants';
-
-// ---- Types ----
-
+// ─── Types ─────────────────────────────────────────────────────────────────
 export interface Card {
-  id: string;
-  color: CardColor | 'wild';
-  value: CardValue;
-  /** Chosen color for wild cards after playing */
-  chosenColor?: CardColor;
+  id: string
+  color: CardColor
+  value: CardValue
 }
 
 export interface Player {
-  id: string;
-  name: string;
-  avatar: string;
-  isBot: boolean;
-  difficulty?: 'easy' | 'medium' | 'hard';
-  hand: Card[];
-  seatIndex: number;
-  isConnected: boolean;
-  hasCalledUno: boolean;
-  signatureColor: string;
+  id: string
+  name: string
+  isHuman: boolean
+  aiLevel?: 'easy' | 'medium' | 'hard'
+  hand: Card[]
+  seatIndex: number
+  score: number
+  calledUno: boolean
+  isConnected: boolean
+  avatar: string
 }
+
+export type GamePhase =
+  | 'idle'
+  | 'dealing'
+  | 'playing'
+  | 'awaiting-color'
+  | 'round-end'
+  | 'game-end'
 
 export interface GameState {
-  id: string;
-  phase: GamePhase;
-  players: Player[];
-  deck: Card[];
-  discardPile: Card[];
-  currentPlayerIndex: number;
-  direction: Direction;
-  currentColor: CardColor;
-  drawStack: number;           // accumulated draw penalty (stacking rule)
-  unoCallWindow: boolean;      // true during 2s window after someone reaches 1 card
-  unoCallWindowPlayer: string | null;
-  lastAction: GameAction | null;
-  houseRules: HouseRules;
-  turnStartTime: number;       // timestamp MS
-  roundNumber: number;
-  winner: string | null;
+  deck: Card[]
+  discardPile: Card[]
+  players: Player[]
+  currentPlayerIndex: number
+  direction: 1 | -1        // 1 = clockwise, -1 = counter-clockwise
+  drawStack: number        // accumulated draw2/wild4 stack
+  phase: GamePhase
+  activeColor: CardColor   // current forced color (may differ from top card)
+  turnStartedAt: number    // timestamp for turn timer
+  wildPending: boolean     // waiting for color selection
 }
 
-export type GameActionType =
-  | 'play' | 'draw' | 'skip-forced' | 'reverse' | 'draw2'
-  | 'wild' | 'wild4' | 'uno-call' | 'uno-penalty'
-  | 'jump-in' | 'seven-swap' | 'zero-rotate' | 'challenge'
-  | 'deal' | 'pass';
-
-export interface GameAction {
-  type: GameActionType;
-  playerId: string;
-  card?: Card;
-  targetPlayerId?: string;
-  chosenColor?: CardColor;
-  challengeSuccess?: boolean;
+// ─── Deck Generation ───────────────────────────────────────────────────────
+let _cardIdCounter = 0
+function makeCard(color: CardColor, value: CardValue): Card {
+  return { id: `card-${++_cardIdCounter}`, color, value }
 }
 
-// ---- Deck Creation ----
+export function generateDeck(): Card[] {
+  const deck: Card[] = []
+  const colors: CardColor[] = ['red', 'yellow', 'green', 'blue']
+  const numbered: CardValue[] = ['1','2','3','4','5','6','7','8','9']
+  const actions: CardValue[] = ['skip','reverse','draw2']
 
-export function createDeck(): Card[] {
-  const cards: Card[] = [];
-
-  for (const color of CARD_COLORS) {
-    // One 0
-    cards.push({ id: nanoid(), color, value: '0' });
-    // Two each of 1-9, skip, reverse, draw2
-    for (let n = 1; n <= 9; n++) {
-      cards.push({ id: nanoid(), color, value: `${n}` as CardValue });
-      cards.push({ id: nanoid(), color, value: `${n}` as CardValue });
-    }
-    for (const special of ['skip', 'reverse', 'draw2'] as const) {
-      cards.push({ id: nanoid(), color, value: special });
-      cards.push({ id: nanoid(), color, value: special });
+  for (const color of colors) {
+    // one 0
+    deck.push(makeCard(color, '0'))
+    // two of each 1-9 and action
+    for (const v of [...numbered, ...actions]) {
+      deck.push(makeCard(color, v))
+      deck.push(makeCard(color, v))
     }
   }
-
   // 4 wilds + 4 wild+4
   for (let i = 0; i < 4; i++) {
-    cards.push({ id: nanoid(), color: 'wild', value: 'wild' });
-    cards.push({ id: nanoid(), color: 'wild', value: 'wild4' });
+    deck.push(makeCard('wild', 'wild'))
+    deck.push(makeCard('wild', 'wild4'))
   }
-
-  return shuffleArray(cards);
+  return deck
 }
 
-// ---- Validation ----
-
-export function canPlayCard(card: Card, topCard: Card, currentColor: CardColor, drawStack: number, houseRules: HouseRules): boolean {
-  // 1. Handling Draw Stack (if rule enabled)
-  if (drawStack > 0 && houseRules.stackDrawCards) {
-    if (topCard.value === 'draw2') {
-      return card.value === 'draw2' || card.value === 'wild4';
-    }
-    if (topCard.value === 'wild4') {
-      return card.value === 'wild4';
-    }
-    // If there's a stack but the top card isn't a draw card? (Shouldn't happen)
-    return false;
+// ─── Fisher-Yates Shuffle ─────────────────────────────────────────────────
+export function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
   }
-
-  // 2. Wilds are always playable normally
-  if (card.value === 'wild' || card.value === 'wild4') {
-    return true;
-  }
-
-  // 3. Match by Color
-  if (card.color === currentColor) {
-    return true;
-  }
-
-  // 4. Match by Value
-  if (card.value === topCard.value) {
-    return true;
-  }
-
-  return false;
+  return a
 }
 
-export function isWild(card: Card): boolean {
-  return card.value === 'wild' || card.value === 'wild4';
+// ─── Card Validation ──────────────────────────────────────────────────────
+export function canPlay(card: Card, topCard: Card, activeColor: CardColor, drawStack: number): boolean {
+  // During a draw stack, only matching draw cards can be played (if stacking enabled via house rules)
+  if (drawStack > 0) return false  // base rule: cannot play on draw stack
+  if (card.value === 'wild' || card.value === 'wild4') return true
+  if (card.color === activeColor) return true
+  if (card.value === topCard.value) return true
+  return false
 }
 
-export function isActionCard(card: Card): boolean {
-  return ['skip', 'reverse', 'draw2', 'wild', 'wild4'].includes(card.value);
-}
-
-export function getCardType(card: Card): 'number' | 'action' | 'wild' {
-  if (card.color === 'wild') return 'wild';
-  if (isActionCard(card)) return 'action';
-  return 'number';
-}
-
-// ---- Draw Pile Management ----
-
-/** Draw N cards from deck; reshuffle discard if needed */
-export function drawCards(
-  deck: Card[],
-  discardPile: Card[],
-  count: number
-): { drawn: Card[]; newDeck: Card[]; newDiscard: Card[] } {
-  let currentDeck = [...deck];
-  const newDiscard = [...discardPile];
-
-  if (currentDeck.length < count) {
-    // Reshuffle discard pile (keep top card)
-    const top = newDiscard.pop();
-    const reshuffled = shuffleArray([...newDiscard]);
-    newDiscard.length = 0;
-    if (top) newDiscard.push(top);
-    currentDeck = [...currentDeck, ...reshuffled];
+export function canPlayWithStacking(card: Card, topCard: Card, activeColor: CardColor, drawStack: number): boolean {
+  if (drawStack > 0) {
+    // Stacking: can play draw2 on draw2, wild4 on wild4
+    if (topCard.value === 'draw2' && card.value === 'draw2') return true
+    if (topCard.value === 'wild4' && card.value === 'wild4') return true
+    return false
   }
-
-  const drawn = currentDeck.splice(0, count);
-  return { drawn, newDeck: currentDeck, newDiscard };
+  return canPlay(card, topCard, activeColor, drawStack)
 }
 
-// ---- Game Initialization ----
-
-export function createInitialGameState(
-  players: Omit<Player, 'hand' | 'hasCalledUno'>[],
-  houseRules: HouseRules = DEFAULT_HOUSE_RULES
-): GameState {
-  let deck = createDeck();
+// ─── Game Initialization ──────────────────────────────────────────────────
+export function createInitialGameState(players: Omit<Player, 'hand' | 'calledUno'>[]): GameState {
+  let deck = shuffle(generateDeck())
 
   // Deal 7 cards to each player
-  const dealtPlayers: Player[] = players.map((p) => {
-    const hand = deck.splice(0, CARDS_PER_HAND);
-    return { ...p, hand, hasCalledUno: false };
-  });
+  const playersWithHands: Player[] = players.map(p => ({
+    ...p,
+    hand: [],
+    calledUno: false,
+  }))
 
-  // Flip first card — re-deal if it's wild4
-  let firstCard = deck.shift()!;
-  while (firstCard.value === 'wild4') {
-    deck.push(firstCard);
-    deck = shuffleArray(deck);
-    firstCard = deck.shift()!;
+  for (let i = 0; i < GAME_LIMITS.STARTING_HAND_SIZE; i++) {
+    for (const player of playersWithHands) {
+      player.hand.push(deck.pop()!)
+    }
   }
 
-  // Determine starting color
-  const startColor: CardColor = firstCard.color === 'wild'
-    ? CARD_COLORS[Math.floor(Math.random() * 4)]
-    : firstCard.color as CardColor;
+  // First discard: skip action cards / wilds as first card
+  let firstCard: Card
+  do {
+    firstCard = deck.pop()!
+    if (firstCard.value !== 'wild' && firstCard.value !== 'wild4' && firstCard.value !== 'skip' && firstCard.value !== 'reverse' && firstCard.value !== 'draw2') {
+      break
+    }
+    deck.unshift(firstCard)  // put back at bottom
+  } while (true)
 
-  const state: GameState = {
-    id: nanoid(),
-    phase: 'dealing',
-    players: dealtPlayers,
+  return {
     deck,
     discardPile: [firstCard],
+    players: playersWithHands,
     currentPlayerIndex: 0,
     direction: 1,
-    currentColor: startColor,
     drawStack: 0,
-    unoCallWindow: false,
-    unoCallWindowPlayer: null,
-    lastAction: null,
-    houseRules,
-    turnStartTime: Date.now(),
-    roundNumber: 1,
-    winner: null,
-  };
-
-  // Apply first card effects
-  return applyFirstCardEffect(state);
-}
-
-function applyFirstCardEffect(state: GameState): GameState {
-  const s = { ...state };
-  const firstCard = s.discardPile[s.discardPile.length - 1];
-
-  switch (firstCard.value) {
-    case 'skip':
-      s.currentPlayerIndex = getNextPlayerIndex(s, 1);
-      break;
-    case 'reverse':
-      if (s.players.length === 2) {
-        s.currentPlayerIndex = getNextPlayerIndex(s, 1);
-      } else {
-        s.direction = -1 as Direction;
-      }
-      break;
-    case 'draw2':
-      s.drawStack = 2;
-      break;
-    case 'wild':
-      // Color already chosen randomly
-      s.phase = 'playing';
-      break;
-    default:
-      break;
+    phase: 'dealing',
+    activeColor: firstCard.color,
+    turnStartedAt: Date.now(),
+    wildPending: false,
   }
-
-  return s;
 }
 
-// ---- Player Index Navigation ----
-
-export function getNextPlayerIndex(
-  state: GameState,
-  steps = 1,
-  fromIndex?: number
-): number {
-  const count = state.players.length;
-  let idx = fromIndex ?? state.currentPlayerIndex;
-  for (let i = 0; i < steps; i++) {
-    idx = ((idx + state.direction) % count + count) % count;
-  }
-  return idx;
+// ─── Next Player Index ─────────────────────────────────────────────────────
+export function nextPlayerIndex(state: GameState, skip = false): number {
+  const n = state.players.length
+  const steps = skip ? 2 : 1
+  return ((state.currentPlayerIndex + state.direction * steps) % n + n) % n
 }
 
-export function getPreviousPlayerIndex(state: GameState): number {
-  const count = state.players.length;
-  return ((state.currentPlayerIndex - state.direction) % count + count) % count;
+// ─── Play Card (pure reducer) ──────────────────────────────────────────────
+export interface PlayCardResult {
+  newState: GameState
+  events: GameEvent[]
 }
 
-// ---- Play a Card ----
+export type GameEvent =
+  | { type: 'CARD_PLAYED'; playerId: string; card: Card }
+  | { type: 'CARD_DRAWN'; playerId: string; count: number }
+  | { type: 'SKIP'; targetId: string }
+  | { type: 'REVERSE' }
+  | { type: 'DRAW2'; targetId: string; count: number }
+  | { type: 'WILD'; playerId: string }
+  | { type: 'WILD4'; targetId: string; count: number }
+  | { type: 'UNO'; playerId: string }
+  | { type: 'ROUND_END'; winnerId: string; score: number }
+  | { type: 'GAME_END'; winnerId: string }
+  | { type: 'DRAW_STACK_HIT'; targetId: string; count: number }
 
-export interface PlayResult {
-  newState: GameState;
-  action: GameAction;
-  requiresColorPick: boolean;
-  challengeAllowed: boolean;
-}
+export function playCard(state: GameState, playerIndex: number, card: Card, pickedColor?: CardColor): PlayCardResult {
+  const events: GameEvent[] = []
+  let gs: GameState = JSON.parse(JSON.stringify(state)) // deep clone
 
-export function playCard(
-  state: GameState,
-  playerId: string,
-  cardId: string,
-  chosenColor?: CardColor,
-  targetPlayerId?: string
-): PlayResult {
-  const playerIdx = state.players.findIndex((p) => p.id === playerId);
-  if (playerIdx < 0) throw new Error('Player not found');
-
-  const player = state.players[playerIdx];
-  const cardIdx = player.hand.findIndex((c) => c.id === cardId);
-  if (cardIdx < 0) throw new Error('Card not in hand');
-
-  const card = player.hand[cardIdx];
-  const topCard = state.discardPile[state.discardPile.length - 1];
-
-  if (!canPlayCard(card, topCard, state.currentColor, state.drawStack, state.houseRules)) {
-    throw new Error('Invalid play');
-  }
+  const player = gs.players[playerIndex]
 
   // Remove card from hand
-  const newHand = [...player.hand];
-  newHand.splice(cardIdx, 1);
+  const cardIdx = player.hand.findIndex(c => c.id === card.id)
+  player.hand.splice(cardIdx, 1)
 
-  const newPlayers = [...state.players];
-  newPlayers[playerIdx] = { ...player, hand: newHand, hasCalledUno: false };
+  // Push to discard
+  gs.discardPile.push(card)
 
-  const newDiscard = [...state.discardPile, { ...card, chosenColor }];
+  events.push({ type: 'CARD_PLAYED', playerId: player.id, card })
 
-  let s: GameState = {
-    ...state,
-    players: newPlayers,
-    discardPile: newDiscard,
-    lastAction: null,
-    unoCallWindow: false,
-    unoCallWindowPlayer: null,
-  };
+  // Apply card effect
+  let skipNext = false
+  const n = gs.players.length
 
-  let requiresColorPick = false;
-  let challengeAllowed = false;
-  const action: GameAction = { type: 'play', playerId, card, chosenColor };
-
-  // Apply card effects
-  switch (card.value) {
-    case 'skip': {
-      action.type = 'skip-forced';
-      const skip1 = getNextPlayerIndex(s);
-      // Skip 1 player (skip them, then advance)
-      if (s.players.length === 2) {
-        // skip = effectively current stays... next = advance 2
-        s.currentPlayerIndex = getNextPlayerIndex(s, 2, s.currentPlayerIndex);
-      } else {
-        s.currentPlayerIndex = getNextPlayerIndex(s, 2, s.currentPlayerIndex);
-      }
-      action.targetPlayerId = s.players[skip1].id;
-      break;
-    }
-
-    case 'reverse': {
-      action.type = 'reverse';
-      s.direction = (s.direction * -1) as Direction;
-      if (s.players.length === 2) {
-        // In 2-player, reverse = skip
-        s.currentPlayerIndex = getNextPlayerIndex(s);
-      } else {
-        s.currentPlayerIndex = getNextPlayerIndex(s);
-      }
-      break;
-    }
-
-    case 'draw2': {
-      action.type = 'draw2';
-      if (s.houseRules.stackDrawCards) {
-        s.drawStack += 2;
-        s.currentPlayerIndex = getNextPlayerIndex(s);
-      } else {
-        const target = getNextPlayerIndex(s);
-        const { drawn, newDeck, newDiscard: nd } = drawCards(s.deck, s.discardPile, 2);
-        newPlayers[target] = {
-          ...newPlayers[target],
-          hand: [...newPlayers[target].hand, ...drawn],
-        };
-        s.players = newPlayers;
-        s.deck = newDeck;
-        s.discardPile = nd;
-        s.drawStack = 0;
-        // Skip the target
-        s.currentPlayerIndex = getNextPlayerIndex(s, 2, s.currentPlayerIndex);
-        action.targetPlayerId = s.players[target].id;
-      }
-      break;
-    }
-
-    case 'wild': {
-      action.type = 'wild';
-      if (chosenColor) {
-        s.currentColor = chosenColor;
-        s.currentPlayerIndex = getNextPlayerIndex(s);
-      } else {
-        requiresColorPick = true;
-        s.phase = 'color-pick';
-      }
-      break;
-    }
-
-    case 'wild4': {
-      action.type = 'wild4';
-      challengeAllowed = !state.houseRules.noMercyWild4;
-      if (chosenColor) {
-        s.currentColor = chosenColor;
-        if (s.houseRules.stackDrawCards) {
-          s.drawStack += 4;
-          s.currentPlayerIndex = getNextPlayerIndex(s);
-        } else {
-          const target = getNextPlayerIndex(s);
-          const { drawn, newDeck, newDiscard: nd } = drawCards(s.deck, s.discardPile, 4);
-          newPlayers[target] = {
-            ...newPlayers[target],
-            hand: [...newPlayers[target].hand, ...drawn],
-          };
-          s.players = newPlayers;
-          s.deck = newDeck;
-          s.discardPile = nd;
-          s.drawStack = 0;
-          s.currentPlayerIndex = getNextPlayerIndex(s, 2, s.currentPlayerIndex);
-          action.targetPlayerId = s.players[target].id;
-        }
-      } else {
-        requiresColorPick = true;
-        s.phase = 'color-pick';
-      }
-      break;
-    }
-
-    default: {
-      // Number card
-      if (card.color !== 'wild') {
-        s.currentColor = card.color as CardColor;
-      }
-
-      // House rule: 7 = swap hands
-      if (card.value === '7' && s.houseRules.sevenZero) {
-        action.type = 'seven-swap';
-        if (targetPlayerId) {
-          const tIdx = s.players.findIndex((p) => p.id === targetPlayerId);
-          if (tIdx >= 0) {
-            const myHand = [...newHand];
-            const theirHand = [...s.players[tIdx].hand];
-            newPlayers[playerIdx] = { ...newPlayers[playerIdx], hand: theirHand };
-            newPlayers[tIdx] = { ...newPlayers[tIdx], hand: myHand };
-            s.players = newPlayers;
-          }
-          action.targetPlayerId = targetPlayerId;
-        }
-      }
-
-      // House rule: 0 = rotate all hands
-      if (card.value === '0' && s.houseRules.sevenZero) {
-        action.type = 'zero-rotate';
-        const hands = s.players.map((p) => [...p.hand]);
-        const n = hands.length;
-        if (s.direction === 1) {
-          // Rotate forward: player[i] gets hand of player[i-1]
-          const last = hands[n - 1];
-          for (let i = n - 1; i > 0; i--) hands[i] = hands[i - 1];
-          hands[0] = last;
-        } else {
-          const first = hands[0];
-          for (let i = 0; i < n - 1; i++) hands[i] = hands[i + 1];
-          hands[n - 1] = first;
-        }
-        s.players = s.players.map((p, i) => ({ ...p, hand: hands[i] }));
-      }
-
-      s.currentPlayerIndex = getNextPlayerIndex(s);
-      break;
-    }
+  if (card.value === 'reverse') {
+    gs.direction = gs.direction === 1 ? -1 : 1
+    events.push({ type: 'REVERSE' })
+    if (n === 2) skipNext = true  // 2-player reverse = skip
   }
 
-
-  // Update current color from played card
-  if (!requiresColorPick && card.color !== 'wild') {
-    s.currentColor = card.color as CardColor;
+  if (card.value === 'skip') {
+    skipNext = true
+    const targetIdx = nextPlayerIndex(gs)
+    events.push({ type: 'SKIP', targetId: gs.players[targetIdx].id })
   }
 
-  // Check win condition
-  if (newHand.length === 0) {
-    s.phase = 'game-end';
-    s.winner = playerId;
-  } else if (newHand.length === 1) {
-    // UNO window opens
-    s.unoCallWindow = true;
-    s.unoCallWindowPlayer = playerId;
-    s.phase = requiresColorPick ? 'color-pick' : 'uno-window';
-  } else if (!requiresColorPick) {
-    s.phase = 'playing';
+  if (card.value === 'draw2') {
+    gs.drawStack += 2
+    const targetIdx = nextPlayerIndex(gs, false)
+    events.push({ type: 'DRAW2', targetId: gs.players[targetIdx].id, count: gs.drawStack })
+    skipNext = true
   }
 
-  s.lastAction = action;
-  s.turnStartTime = Date.now();
-
-  return { newState: s, action, requiresColorPick, challengeAllowed };
-}
-
-// ---- Draw Cards (player action) ----
-
-export function drawCardAction(state: GameState, playerId: string): GameState {
-  const playerIdx = state.players.findIndex((p) => p.id === playerId);
-  if (playerIdx < 0) throw new Error('Player not found');
-
-  const drawCount = state.drawStack > 0 ? state.drawStack : 1;
-  const { drawn, newDeck, newDiscard } = drawCards(state.deck, state.discardPile, drawCount);
-
-  const player = state.players[playerIdx];
-  const newHand = [...player.hand, ...drawn];
-
-  const newPlayers = [...state.players];
-  newPlayers[playerIdx] = { ...player, hand: newHand, hasCalledUno: false };
-
-  const newState: GameState = {
-    ...state,
-    players: newPlayers,
-    deck: newDeck,
-    discardPile: newDiscard,
-    drawStack: 0,
-    turnStartTime: Date.now(),
-    lastAction: { type: 'draw', playerId },
-  };
-
-  // If drew 1, check if playable; otherwise pass turn
-  if (drawCount === 1 && drawn.length === 1) {
-    const drawnCard = drawn[0];
-    const topCard = newState.discardPile[newState.discardPile.length - 1];
-    if (canPlayCard(drawnCard, topCard, state.currentColor, 0, state.houseRules)) {
-      return newState; // Player can choose to play it — don't advance yet
-    }
-  }
-
-  // Advance turn
-  newState.currentPlayerIndex = getNextPlayerIndex(newState);
-  newState.phase = 'playing';
-  return newState;
-}
-
-// ---- Pass Turn ----
-
-export function passTurn(state: GameState): GameState {
-  return {
-    ...state,
-    currentPlayerIndex: getNextPlayerIndex(state),
-    phase: 'playing',
-    turnStartTime: Date.now(),
-    lastAction: { type: 'pass', playerId: state.players[state.currentPlayerIndex].id },
-  };
-}
-
-// ---- Set Wild Color ----
-
-export function setWildColor(state: GameState, playerId: string, color: CardColor): GameState {
-  const lastCard = state.discardPile[state.discardPile.length - 1];
-  const newDiscard = [...state.discardPile];
-  newDiscard[newDiscard.length - 1] = { ...lastCard, chosenColor: color };
-
-  let s: GameState = {
-    ...state,
-    currentColor: color,
-    discardPile: newDiscard,
-    phase: 'playing',
-  };
-
-  // Apply wild4 draw effect now that color is chosen
-  if (lastCard.value === 'wild4') {
-    if (s.houseRules.stackDrawCards) {
-      // Handled when next player can't stack
+  if (card.value === 'wild' || card.value === 'wild4') {
+    if (card.value === 'wild4') {
+      gs.drawStack += 4
+      const targetIdx = nextPlayerIndex(gs, false)
+      events.push({ type: 'WILD4', targetId: gs.players[targetIdx].id, count: gs.drawStack })
+      skipNext = true
     } else {
-      const target = getNextPlayerIndex(s, 1, getPreviousPlayerIndex(s));
-      const { drawn, newDeck, newDiscard: nd } = drawCards(s.deck, s.discardPile, 4);
-      s.players = s.players.map((p, i) =>
-        i === target ? { ...p, hand: [...p.hand, ...drawn] } : p
-      );
-      s.deck = newDeck;
-      s.discardPile = nd;
-      s.currentPlayerIndex = getNextPlayerIndex(s, 2,
-        ((s.currentPlayerIndex - s.direction + s.players.length) % s.players.length));
+      events.push({ type: 'WILD', playerId: player.id })
+    }
+    gs.activeColor = pickedColor ?? 'red'
+    gs.wildPending = !pickedColor
+  } else {
+    gs.activeColor = card.color
+    gs.wildPending = false
+  }
+
+  // Check UNO
+  if (player.hand.length === 1) {
+    player.calledUno = false  // reset — player must call UNO
+    events.push({ type: 'UNO', playerId: player.id })
+  }
+
+  // Check win
+  if (player.hand.length === 0) {
+    gs.phase = 'round-end'
+    const score = computeScore(gs.players, player.id)
+    events.push({ type: 'ROUND_END', winnerId: player.id, score })
+    player.score += score
+    if (player.score >= 500) {
+      gs.phase = 'game-end'
+      events.push({ type: 'GAME_END', winnerId: player.id })
     }
   } else {
-    s.currentPlayerIndex = getNextPlayerIndex(s);
+    // Advance turn
+    gs.currentPlayerIndex = nextPlayerIndex(gs, skipNext)
+    gs.turnStartedAt = Date.now()
   }
 
-  s.turnStartTime = Date.now();
-  return s;
+  return { newState: gs, events }
 }
 
-// ---- UNO Call ----
+// ─── Draw Cards ────────────────────────────────────────────────────────────
+export function drawCards(state: GameState, playerIndex: number, count: number): { newState: GameState; drawn: Card[] } {
+  let gs: GameState = JSON.parse(JSON.stringify(state))
+  const player = gs.players[playerIndex]
+  const drawn: Card[] = []
 
-export function callUno(state: GameState, callerId: string): GameState {
-  // Validate the person who should have called UNO
-  if (state.unoCallWindowPlayer && state.unoCallWindowPlayer !== callerId) {
-    // Someone caught the player who forgot to call UNO
-    const victimIdx = state.players.findIndex((p) => p.id === state.unoCallWindowPlayer);
-    if (victimIdx < 0) return state;
-
-    const { drawn, newDeck, newDiscard } = drawCards(state.deck, state.discardPile, 2);
-    const newPlayers = [...state.players];
-    newPlayers[victimIdx] = {
-      ...newPlayers[victimIdx],
-      hand: [...newPlayers[victimIdx].hand, ...drawn],
-      hasCalledUno: false,
-    };
-
-    return {
-      ...state,
-      players: newPlayers,
-      deck: newDeck,
-      discardPile: newDiscard,
-      unoCallWindow: false,
-      unoCallWindowPlayer: null,
-      phase: 'playing',
-      lastAction: { type: 'uno-penalty', playerId: callerId, targetPlayerId: state.unoCallWindowPlayer ?? undefined },
-    };
+  for (let i = 0; i < count; i++) {
+    if (gs.deck.length === 0) {
+      // Reshuffle discard into deck
+      const top = gs.discardPile.pop()!
+      gs.deck = shuffle(gs.discardPile)
+      gs.discardPile = [top]
+    }
+    if (gs.deck.length > 0) {
+      const card = gs.deck.pop()!
+      player.hand.push(card)
+      drawn.push(card)
+    }
   }
 
-  // Player calls UNO themselves
-  const playerIdx = state.players.findIndex((p) => p.id === callerId);
-  if (playerIdx < 0) return state;
-
-  const newPlayers = [...state.players];
-  newPlayers[playerIdx] = { ...newPlayers[playerIdx], hasCalledUno: true };
-
-  return {
-    ...state,
-    players: newPlayers,
-    unoCallWindow: false,
-    unoCallWindowPlayer: null,
-    phase: 'playing',
-    lastAction: { type: 'uno-call', playerId: callerId },
-  };
+  return { newState: gs, drawn }
 }
 
-// ---- Challenge Wild+4 ----
+// ─── Handle Draw Stack Hit ─────────────────────────────────────────────────
+export function resolveDrawStack(state: GameState): { newState: GameState; events: GameEvent[] } {
+  const events: GameEvent[] = []
+  const gs = JSON.parse(JSON.stringify(state)) as GameState
+  if (gs.drawStack <= 0) return { newState: gs, events }
 
-export function challengeWild4(state: GameState, challengerId: string): GameState {
-  // Previous player who played wild4
-  const prevIdx = getPreviousPlayerIndex(state);
-  const bluffer = state.players[prevIdx];
-  const challenger = state.players.find((p) => p.id === challengerId);
-  if (!challenger || !bluffer) return state;
+  const target = gs.players[gs.currentPlayerIndex]
+  const count = gs.drawStack
+  gs.drawStack = 0
 
-  // Was the bluff valid? Check if bluffer had a card matching previous color
-  // (The second-to-last card on discard before the wild4)
-  const previousTopIdx = state.discardPile.length - 2;
-  const previousTop = state.discardPile[previousTopIdx];
-  const previousColor = previousTop?.chosenColor ?? previousTop?.color as CardColor ?? 'red';
+  const { newState } = drawCards(gs, gs.currentPlayerIndex, count)
+  events.push({ type: 'DRAW_STACK_HIT', targetId: target.id, count })
 
-  const hadMatchingCard = bluffer.hand.some(
-    (c) => c.color === previousColor || (c.value === previousTop?.value)
-  );
+  newState.currentPlayerIndex = nextPlayerIndex(newState)
+  newState.turnStartedAt = Date.now()
 
-  let newPlayers = [...state.players];
-  let { newDeck, newDiscard } = { newDeck: state.deck, newDiscard: state.discardPile };
-
-  if (hadMatchingCard) {
-    // Bluff! Bluffer draws 4 instead of challenger
-    const blufferIdx = prevIdx;
-    const result = drawCards(newDeck, newDiscard, 4);
-    newPlayers[blufferIdx] = { ...newPlayers[blufferIdx], hand: [...newPlayers[blufferIdx].hand, ...result.drawn] };
-    newDeck = result.newDeck;
-    newDiscard = result.newDiscard;
-  } else {
-    // Not a bluff — challenger draws 6 (4 + 2 penalty)
-    const challengerIdx = newPlayers.findIndex((p) => p.id === challengerId);
-    const result = drawCards(newDeck, newDiscard, 6);
-    newPlayers[challengerIdx] = { ...newPlayers[challengerIdx], hand: [...newPlayers[challengerIdx].hand, ...result.drawn] };
-    newDeck = result.newDeck;
-    newDiscard = result.newDiscard;
-  }
-
-  return {
-    ...state,
-    players: newPlayers,
-    deck: newDeck,
-    discardPile: newDiscard,
-    phase: 'playing',
-    lastAction: {
-      type: 'challenge',
-      playerId: challengerId,
-      targetPlayerId: bluffer.id,
-      challengeSuccess: hadMatchingCard,
-    },
-  };
+  return { newState, events }
 }
 
-// ---- Jump-In ----
-
-export function jumpIn(state: GameState, playerId: string, cardId: string): PlayResult {
-  if (!state.houseRules.jumpIn) throw new Error('Jump-In not enabled');
-
-  const playerIdx = state.players.findIndex((p) => p.id === playerId);
-  if (playerIdx < 0) throw new Error('Player not found');
-
-  const player = state.players[playerIdx];
-  const card = player.hand.find((c) => c.id === cardId);
-  if (!card) throw new Error('Card not in hand');
-
-  const topCard = state.discardPile[state.discardPile.length - 1];
-
-  // Jump-In requires exact match (same color AND same value)
-  if (card.color !== topCard.color || card.value !== topCard.value) {
-    throw new Error('Jump-In requires identical card');
-  }
-
-  // Change current player and play
-  const adjustedState = {
-    ...state,
-    currentPlayerIndex: playerIdx,
-  };
-
-  return playCard(adjustedState, playerId, cardId);
+// ─── Score Calculation ─────────────────────────────────────────────────────
+function computeScore(players: Player[], winnerId: string): number {
+  return players
+    .filter(p => p.id !== winnerId)
+    .flatMap(p => p.hand)
+    .reduce((acc, card) => {
+      if (card.value === 'wild' || card.value === 'wild4') return acc + 50
+      if (['skip','reverse','draw2'].includes(card.value)) return acc + 20
+      return acc + parseInt(card.value, 10)
+    }, 0)
 }
 
-// ---- Validate current player ----
-
-export function isPlayerTurn(state: GameState, playerId: string): boolean {
-  return state.players[state.currentPlayerIndex]?.id === playerId;
+// ─── Valid Plays ───────────────────────────────────────────────────────────
+export function getValidPlays(hand: Card[], topCard: Card, activeColor: CardColor, drawStack: number, stackingEnabled: boolean): Card[] {
+  return hand.filter(c =>
+    stackingEnabled
+      ? canPlayWithStacking(c, topCard, activeColor, drawStack)
+      : canPlay(c, topCard, activeColor, drawStack)
+  )
 }
 
-// ---- Get current top card effective color ----
-
-export function getEffectiveColor(state: GameState): CardColor {
-  return state.currentColor;
-}
-
-// ---- Get playable cards for player ----
-
-export function getPlayableCards(state: GameState, playerId: string): Card[] {
-  const player = state.players.find((p) => p.id === playerId);
-  if (!player) return [];
-  const topCard = state.discardPile[state.discardPile.length - 1];
-  return player.hand.filter((c) =>
-    canPlayCard(c, topCard, state.currentColor, state.drawStack, state.houseRules)
-  );
+// ─── Reshuffle Stats ──────────────────────────────────────────────────────
+export function getTopCard(state: GameState): Card {
+  return state.discardPile[state.discardPile.length - 1]
 }

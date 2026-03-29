@@ -1,84 +1,70 @@
-/**
- * playAnimation.ts — Card play animation + shockwave + camera shake
- */
+import gsap from 'gsap'
+import type { Vec3 } from '../utils/math'
+import { bezierQuad, arcMid } from '../utils/math'
+import { TIMING, SCENE } from '../utils/constants'
 
-import gsap from 'gsap';
-import * as THREE from 'three';
-import { cameraShake } from './dealAnimation';
-
-export function playCardAnimation(
-  cardMesh: THREE.Object3D,
-  fromPos: THREE.Vector3,
-  discardPos: THREE.Vector3,
-  camera: THREE.Camera,
-  isWild: boolean = false,
-  onComplete?: () => void
-): void {
-  const tl = gsap.timeline({ onComplete });
-
-  // Lift
-  tl.to(cardMesh.position, {
-    y: fromPos.y + 0.8,
-    duration: 0.12,
-    ease: 'power2.out',
-  })
-  // Arc to discard
-  .to(cardMesh.position, {
-    x: discardPos.x,
-    y: discardPos.y + 0.8,
-    z: discardPos.z,
-    duration: 0.3,
-    ease: 'power2.inOut',
-  })
-  // Spin in air
-  .to(cardMesh.rotation, {
-    z: Math.PI * 2,
-    duration: 0.3,
-    ease: 'power2.inOut',
-  }, '<')
-  // Slam down
-  .to(cardMesh.position, {
-    y: discardPos.y,
-    duration: 0.1,
-    ease: 'power3.in',
-    onComplete: () => {
-      cameraShake(camera, isWild ? 0.25 : 0.1, 0.25);
-    },
-  });
-
-  // Wild card: prismatic burst
-  if (isWild) {
-    // Bloom intensity spike handled by PostFX reactively
-    tl.to({}, { duration: 0.05 }); // placeholder timing
-  }
+export interface PlayAnimTarget {
+  setPosition: (x: number, y: number, z: number) => void
+  setRotation: (x: number, y: number, z: number) => void
+  setVisible: (v: boolean) => void
 }
 
-export function drawCardAnimation(
-  cardMesh: THREE.Object3D,
-  deckPos: THREE.Vector3,
-  handPos: THREE.Vector3,
-  onComplete?: () => void
-): void {
-  const tl = gsap.timeline({ onComplete });
+/**
+ * Arc a card from a player's hand position to the discard pile.
+ * Includes Y-axis spin on arrival + subtle camera shake.
+ */
+export function playAnimation(
+  target: PlayAnimTarget,
+  fromPos: Vec3,
+  onComplete?: () => void,
+): gsap.core.Timeline {
+  const toPos: Vec3 = { x: SCENE.DISCARD_POSITION[0], y: 0.1, z: SCENE.DISCARD_POSITION[2] }
+  const mid = arcMid(fromPos, toPos, 2.5)
 
-  tl.set(cardMesh.position, { x: deckPos.x, y: deckPos.y, z: deckPos.z })
-    .to(cardMesh.position, {
-      x: (deckPos.x + handPos.x) / 2,
-      y: Math.max(deckPos.y, handPos.y) + 1.2,
-      z: (deckPos.z + handPos.z) / 2,
-      duration: 0.2,
-      ease: 'power2.out',
-    })
-    .to(cardMesh.position, {
-      x: handPos.x,
-      y: handPos.y,
-      z: handPos.z,
-      duration: 0.15,
-      ease: 'power2.in',
-    })
-    .to(cardMesh.rotation, {
-      y: Math.PI,
-      duration: 0.2,
-      ease: 'power1.inOut',
-    }, '-=0.15');
+  const progress = { t: 0 }
+  const spin = { rot: 0 }
+  const tl = gsap.timeline({ onComplete })
+
+  tl.to(progress, {
+    t: 1,
+    duration: TIMING.CARD_ARC_MS / 1000,
+    ease: 'power3.inOut',
+    onUpdate() {
+      const pos = bezierQuad(fromPos, mid, toPos, progress.t)
+      target.setPosition(pos.x, pos.y, pos.z)
+    },
+  })
+
+  tl.to(spin, {
+    rot: Math.PI * 2,
+    duration: 0.25,
+    ease: 'power1.out',
+    onUpdate() {
+      target.setRotation(Math.PI / 2, spin.rot, 0)
+    },
+  }, '-=0.15')
+
+  return tl
+}
+
+/**
+ * Camera shake for impactful plays.
+ */
+export function cameraShake(camera: { position: { x: number; y: number } }, intensity = 0.08) {
+  const origin = { x: camera.position.x, y: camera.position.y }
+  const shake = { t: 0 }
+  return gsap.to(shake, {
+    t: 1,
+    duration: 0.4,
+    ease: 'none',
+    onUpdate() {
+      const amt = (1 - shake.t) * intensity
+      camera.position.x = origin.x + (Math.random() - 0.5) * amt
+      camera.position.y = origin.y + (Math.random() - 0.5) * amt
+    },
+    onComplete() {
+      camera.position.x = origin.x
+      camera.position.y = origin.y
+    },
+  })
 }
